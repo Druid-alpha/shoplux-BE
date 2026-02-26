@@ -3,9 +3,9 @@ const { z } = require('zod')
 const cloudinary = require('../config/cloudinary') // adjust the path
 
 const Product = require('../models/product')
-const Brand = require('../models/brand')
-const Category = require('../models/category')
-const Color = require('../models/color')
+const Brand = require('../models/Brand')
+const Category = require('../models/Category')
+const Color = require('../models/Color')
 const { uploadToCloudinary } = require('../middleware/uploadMiddleware')
 
 /* =====================================================

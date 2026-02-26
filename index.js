@@ -7,46 +7,44 @@ const rateLimit = require('express-rate-limit')
 const cookieParser = require('cookie-parser')
 const morgan = require('morgan')
 
-
 const bcrypt = require('bcryptjs')
-const User = require('./models/user')
+const User = require('./src/models/user')
 
 const app = express()
 
 /* ------------------------------------------------
-   DATABASE CONNECTION (SERVERLESS SAFE)
+   DATABASE CONNECTION
 ------------------------------------------------- */
 
-let isConnected = false
-
 async function connectDB() {
-  if (isConnected) return
+  try {
+    await mongoose.connect(process.env.MONGO_URI)
+    console.log('✅ MongoDB connected')
 
-  const db = await mongoose.connect(process.env.MONGO_URI)
-
-  isConnected = db.connections[0].readyState
-  console.log('✅ MongoDB connected')
-
-  // create admin only once
-  const existingAdmin = await User.findOne({
-    email: process.env.ADMIN_EMAIL
-  })
-
-  if (!existingAdmin) {
-    const hashedPassword = await bcrypt.hash(
-      process.env.ADMIN_PASSWORD,
-      10
-    )
-
-    await User.create({
-      name: 'Admin',
-      email: process.env.ADMIN_EMAIL,
-      password: hashedPassword,
-      role: 'admin',
-      emailVerified: true
+    // create admin only once
+    const existingAdmin = await User.findOne({
+      email: process.env.ADMIN_EMAIL
     })
 
-    console.log('✅ Default admin created')
+    if (!existingAdmin) {
+      const hashedPassword = await bcrypt.hash(
+        process.env.ADMIN_PASSWORD,
+        10
+      )
+
+      await User.create({
+        name: 'Admin',
+        email: process.env.ADMIN_EMAIL,
+        password: hashedPassword,
+        role: 'admin',
+        emailVerified: true
+      })
+
+      console.log('✅ Default admin created')
+    }
+  } catch (err) {
+    console.error('❌ MongoDB connection error:', err.message)
+    process.exit(1)
   }
 }
 
@@ -81,18 +79,18 @@ app.use(rateLimit({
 app.post(
   '/api/payments/paystack/webhook',
   express.raw({ type: 'application/json' }),
-  require('./controllers/paymentController').paystackWebHook
+  require('./src/controllers/paymentController').paystackWebHook
 )
 
-app.use('/api/auth', require('./routes/authRoutes'))
-app.use('/api/users', require('./routes/userRoutes'))
-app.use('/api/products', require('./routes/productRoutes'))
-app.use('/api/reviews', require('./routes/reviewRoutes'))
-app.use('/api/cart', require('./routes/cartRoutes'))
-app.use('/api/orders', require('./routes/orderRoutes'))
-app.use('/api/wishlist', require('./routes/wishlistRoutes'))
-app.use('/api/admin', require('./routes/adminRoutes'))
-app.use('/api/payments', require('./routes/paymentRoutes'))
+app.use('/api/auth', require('./src/routes/authRoutes'))
+app.use('/api/users', require('./src/routes/userRoutes'))
+app.use('/api/products', require('./src/routes/productRoutes'))
+app.use('/api/reviews', require('./src/routes/reviewRoutes'))
+app.use('/api/cart', require('./src/routes/cartRoutes'))
+app.use('/api/orders', require('./src/routes/orderRoutes'))
+app.use('/api/wishlist', require('./src/routes/wishlistRoutes'))
+app.use('/api/admin', require('./src/routes/adminRoutes'))
+app.use('/api/payments', require('./src/routes/paymentRoutes'))
 
 /* ------------------------------------------------
    HEALTH
@@ -114,10 +112,13 @@ app.use((err, req, res, next) => {
 })
 
 /* ------------------------------------------------
-   EXPORT FOR VERCEL
+   LOCAL DEV SERVER (not used on Vercel)
 ------------------------------------------------- */
 
-module.exports = async (req, res) => {
-  await connectDB()
-  return app(req, res)
-}
+const PORT = process.env.PORT || 5000
+
+connectDB().then(() => {
+  app.listen(PORT, () => {
+    console.log(`🚀 Server running on port ${PORT}`)
+  })
+})
