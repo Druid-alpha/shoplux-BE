@@ -2,6 +2,9 @@
   "name": "server",
   "version": "1.0.0",
   "main": "index.js",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node index.js",
@@ -29,13 +32,15 @@
     "multer": "^2.0.2",
     "node-mailjet": "^6.0.11",
     "nodemailer": "^7.0.10",
-    "nodemon": "^3.1.10",
     "pdfkit": "^0.17.2",
     "resend": "^6.4.2",
     "streamifier": "^0.1.1",
     "universal-cookie": "^8.0.1",
     "xss-clean": "^0.1.4",
     "zod": "^4.1.13"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
   },
   "description": ""
 }

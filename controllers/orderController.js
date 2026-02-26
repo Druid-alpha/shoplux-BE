@@ -4,6 +4,7 @@ const Product = require('../models/product')
 const PDFDocument = require('pdfkit')
 const fs = require('fs')
 const path = require('path')
+const cloudinary = require('../config/cloudinary')
 
 
 
@@ -71,20 +72,47 @@ exports.createOrder = async (req, res) => {
     user.cart = []
     await user.save()
 
-    const invoiceName = `invoice-${order._id}.pdf`
-    const invoicePath = path.join(__dirname, '..', 'invoices', invoiceName)
-    const doc = new PDFDocument()
-    doc.pipe(fs.createWriteStream(invoicePath))
-    doc.fontSize(20).text('Invoice', { align: 'center' })
-    doc.moveDown()
-    doc.fontSize(16).text(`Order ID: ${order._id}`)
-    doc.text(`Total: ₦${total}`)
-    doc.moveDown()
-    orderItems.forEach((item, i) => {
-      doc.text(`${i + 1}. ${item.product} × ${item.qty} - ₦${item.priceAtPurchase * item.qty}`)
-    })
-    doc.end()
-    order.invoiceUrl = `/invoices/${invoiceName}`
+    // ---------------------------------------------------------
+    // Generate PDF invoice → write to /tmp (writable on Vercel)
+    // then upload to Cloudinary so the URL persists
+    // ---------------------------------------------------------
+    try {
+      const invoiceName = `invoice-${order._id}.pdf`
+      const tmpPath = path.join('/tmp', invoiceName)
+
+      await new Promise((resolve, reject) => {
+        const doc = new PDFDocument()
+        const stream = fs.createWriteStream(tmpPath)
+        doc.pipe(stream)
+        doc.fontSize(20).text('Invoice', { align: 'center' })
+        doc.moveDown()
+        doc.fontSize(16).text(`Order ID: ${order._id}`)
+        doc.text(`Total: ₦${total}`)
+        doc.moveDown()
+        orderItems.forEach((item, i) => {
+          doc.text(`${i + 1}. ${item.product} × ${item.qty} - ₦${item.priceAtPurchase * item.qty}`)
+        })
+        doc.end()
+        stream.on('finish', resolve)
+        stream.on('error', reject)
+      })
+
+      const uploaded = await cloudinary.uploader.upload(tmpPath, {
+        folder: 'invoices',
+        resource_type: 'raw',
+        public_id: `invoice-${order._id}`,
+        format: 'pdf'
+      })
+
+      order.invoiceUrl = uploaded.secure_url
+      await order.save()
+
+      // Clean up tmp file
+      fs.unlink(tmpPath, () => { })
+    } catch (pdfErr) {
+      // Non-fatal – order is created, just log the PDF error
+      console.error('Invoice generation failed:', pdfErr.message)
+    }
 
     res.status(201).json({ order, invoiceUrl: order.invoiceUrl, userEmail: user.email })
   } catch (error) {
@@ -92,6 +120,7 @@ exports.createOrder = async (req, res) => {
     res.status(500).json({ message: error.message })
   }
 }
+
 
 exports.getMyOrder = async (req, res) => {
   try {

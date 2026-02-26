@@ -1,8 +1,8 @@
 const crypto = require('crypto')
-const mongoose=require('mongoose')
-const Order= require('../models/order')
-const Product= require('../models/product')
-const User= require('../models/user')
+const mongoose = require('mongoose')
+const Order = require('../models/order')
+const Product = require('../models/product')
+const User = require('../models/user')
 const paystack = require('../config/paystack')
 
 
@@ -11,7 +11,7 @@ const paystack = require('../config/paystack')
 exports.initPaystackTransaction = async (req, res) => {
   try {
     const { orderId } = req.body
-    const userId = req.userId
+    const userId = req.user.id  // ✅ was req.userId (always undefined)
 
     if (!orderId) {
       return res.status(400).json({ message: "Order ID is required" })
@@ -37,7 +37,7 @@ exports.initPaystackTransaction = async (req, res) => {
     }
 
     // 2️⃣ generate reference
-    const reference =` ORD_${order._id}_${Date.now()}`
+    const reference = ` ORD_${order._id}_${Date.now()}`
 
     // 3️⃣ initialize paystack
     const response = await paystack.post("/transaction/initialize", {

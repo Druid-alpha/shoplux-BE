@@ -6,7 +6,7 @@ const cors = require('cors')
 const rateLimit = require('express-rate-limit')
 const cookieParser = require('cookie-parser')
 const morgan = require('morgan')
-const path = require('path')
+
 
 const bcrypt = require('bcryptjs')
 const User = require('./models/user')
@@ -54,8 +54,8 @@ async function connectDB() {
    MIDDLEWARE
 ------------------------------------------------- */
 
+app.set('trust proxy', 1)
 app.use(express.json({ limit: '10mb' }))
-app.use('/invoices', express.static(path.join(__dirname, 'invoices')))
 app.use(express.urlencoded({ extended: true }))
 app.use(cookieParser())
 app.use(helmet())
