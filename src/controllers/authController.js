@@ -4,6 +4,7 @@ const bcrypt = require('bcryptjs')
 const sendEmail = require('../utils/sendEmail')
 const { verifyRefreshToken, signAccessToken, signRefreshToken } = require('../config/tokenService')
 const cookieOption = require('../utils/cookieOptions')
+const handleZodError = require('../utils/handleZodError')
 const crypto = require('crypto')
 
 const registerSchema = z.object({
@@ -65,9 +66,22 @@ exports.register = async (req, res) => {
         res
             .status(201)
             .json({ success: true, message: 'Registered, check email for OTP' })
-    } catch (error) {
-        res.status(400).json({ message: error.message })
+   } catch (error) {
+
+    const zodErrors = handleZodError(error)
+
+    if (zodErrors) {
+        return res.status(400).json({
+            success: false,
+            errors: zodErrors
+        })
     }
+
+    res.status(500).json({
+        success: false,
+        message: 'Server error'
+    })
+}
 }
 
 exports.resendOtp = async (req, res) => {
@@ -197,15 +211,22 @@ exports.login = async (req, res) => {
             }
         })
 
-    } catch (error) {
+   } catch (error) {
 
-        res.status(400).json({
+    const zodErrors = handleZodError(error)
+
+    if (zodErrors) {
+        return res.status(400).json({
             success: false,
-            message: error.message
+            errors: zodErrors
         })
-
-
     }
+
+    res.status(500).json({
+        success: false,
+        message: 'Server error'
+    })
+}
 }
 
 exports.refresh = async (req, res) => {

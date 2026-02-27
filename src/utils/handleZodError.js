@@ -3,8 +3,13 @@ const { ZodError } = require('zod')
 
 function handleZodError(error) {
   if (error instanceof ZodError) {
-    // Join all field errors into a readable string
-    return error.errors.map(e => `${e.path.join('.')} : ${e.message}`).join(', ')
+    const formatted = {}
+
+    error.issues.forEach(issue => {
+      formatted[issue.path[0]] = issue.message
+    })
+
+    return formatted
   }
   return null
 }
