@@ -66,22 +66,22 @@ exports.register = async (req, res) => {
         res
             .status(201)
             .json({ success: true, message: 'Registered, check email for OTP' })
-   } catch (error) {
+    } catch (error) {
 
-    const zodErrors = handleZodError(error)
+        const zodErrors = handleZodError(error)
 
-    if (zodErrors) {
-        return res.status(400).json({
+        if (zodErrors) {
+            return res.status(400).json({
+                success: false,
+                errors: zodErrors
+            })
+        }
+
+        res.status(500).json({
             success: false,
-            errors: zodErrors
+            message: 'Server error'
         })
     }
-
-    res.status(500).json({
-        success: false,
-        message: 'Server error'
-    })
-}
 }
 
 exports.resendOtp = async (req, res) => {
@@ -164,18 +164,18 @@ exports.verifyOtp = async (req, res) => {
         user.otpBlockedUntil = undefined
 
         await user.save()
-// 🎉 SEND WELCOME EMAIL
-await sendEmail({
-  to: user.email,
-  subject: 'Welcome to ShopLuxe 🎉',
-  html: `
+        // 🎉 SEND WELCOME EMAIL
+        await sendEmail({
+            to: user.email,
+            subject: 'Welcome to ShopLuxe 🎉',
+            html: `
     <h2>Welcome, ${user.name} 👋</h2>
     <p>Your email has been successfully verified.</p>
     <p>You can now log in and start shopping amazing products.</p>
     <br />
     <p><b>Happy shopping 🛒</b></p>
   `
-})
+        })
         res.json({ message: 'Email verified successfully' })
     } catch (error) {
         res.status(400).json({ message: error.message })
@@ -203,6 +203,8 @@ exports.login = async (req, res) => {
         res.json({
             success: true,
             message: 'Login successful',
+            accessToken,
+            refreshToken,
             user: {
                 id: user._id,
                 name: user.name,
@@ -211,22 +213,22 @@ exports.login = async (req, res) => {
             }
         })
 
-   } catch (error) {
+    } catch (error) {
 
-    const zodErrors = handleZodError(error)
+        const zodErrors = handleZodError(error)
 
-    if (zodErrors) {
-        return res.status(400).json({
+        if (zodErrors) {
+            return res.status(400).json({
+                success: false,
+                errors: zodErrors
+            })
+        }
+
+        res.status(500).json({
             success: false,
-            errors: zodErrors
+            message: 'Server error'
         })
     }
-
-    res.status(500).json({
-        success: false,
-        message: 'Server error'
-    })
-}
 }
 
 exports.refresh = async (req, res) => {
@@ -251,7 +253,11 @@ exports.refresh = async (req, res) => {
         const newAccessToken = signAccessToken({ id: user._id, role: user.role })
         res.cookie('accessToken', newAccessToken, cookieOption(15 * 60 * 1000))
         res.cookie('refreshToken', newRefreshToken, cookieOption(7 * 24 * 60 * 60 * 1000))
-        res.json({ user: { id: user._id, name: user.name, email: user.email, role: user.role } })
+        res.json({
+            accessToken: newAccessToken,
+            refreshToken: newRefreshToken,
+            user: { id: user._id, name: user.name, email: user.email, role: user.role }
+        })
     } catch (error) {
         res.status(401).json({ message: 'invalid or expired token' })
     }
@@ -281,7 +287,12 @@ exports.logOut = async (req, res) => {
 }
 exports.me = async (req, res) => {
     try {
-        const token = req.cookies?.accessToken
+        let token = req.cookies?.accessToken
+
+        if (!token && req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+            token = req.headers.authorization.split(' ')[1]
+        }
+
         if (!token) return res.status(401).json({ message: 'no token' })
         const decoded = require('../config/tokenService').verifyAccessToken(token)
         const user = await User.findById(decoded.id).select('-password -refreshTokens')
