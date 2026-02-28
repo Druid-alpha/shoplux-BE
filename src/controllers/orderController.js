@@ -91,14 +91,19 @@ exports.createOrder = async (req, res) => {
         const doc = new PDFDocument()
         const stream = fs.createWriteStream(tmpPath)
         doc.pipe(stream)
-        doc.fontSize(20).text('Invoice', { align: 'center' })
+        doc.fontSize(25).text('OFFICIAL INVOICE', { align: 'center' })
         doc.moveDown()
-        doc.fontSize(16).text(`Order ID: ${order._id}`)
-        doc.text(`Total: ₦${total}`)
+        doc.fontSize(12).text(`Order ID: ${order._id}`)
+        doc.text(`Date: ${new Date().toLocaleDateString()}`)
         doc.moveDown()
+        doc.text('--------------------------------------------------')
         orderItems.forEach((item, i) => {
-          doc.text(`${i + 1}. ${item.product} × ${item.qty} - ₦${item.priceAtPurchase * item.qty}`)
+          const variantInfo = item.variant?.sku ? ` (${item.variant.sku})` : ''
+          doc.text(`${i + 1}. ${item.title}${variantInfo} x ${item.qty} - ₦${(item.priceAtPurchase * item.qty).toLocaleString()}`)
         })
+        doc.moveDown()
+        doc.text('--------------------------------------------------')
+        doc.fontSize(16).text(`TOTAL AMOUNT: ₦${total.toLocaleString()}`, { align: 'right' })
         doc.end()
         stream.on('finish', resolve)
         stream.on('error', reject)
@@ -106,7 +111,7 @@ exports.createOrder = async (req, res) => {
 
       const uploaded = await cloudinary.uploader.upload(tmpPath, {
         folder: 'invoices',
-        resource_type: 'raw',
+        resource_type: 'image', // ✅ Use image for PDFs to allow proper browser viewing
         public_id: `invoice-${order._id}`,
         format: 'pdf'
       })
@@ -143,8 +148,8 @@ exports.getOrderId = async (req, res) => {
     const order = await Order.findById(req.params.id).populate('items.product')
     if (!order) return res.status(404).json({ message: 'Order not found' })
 
-    const isOwner = order.user.toString() === req.user.id.toString()
     const isAdmin = req.user.role === 'admin'
+    const isOwner = String(order.user) === String(req.user.id)
 
     if (!isOwner && !isAdmin) {
       return res.status(403).json({ message: 'Access denied' })

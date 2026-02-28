@@ -20,17 +20,21 @@ exports.addToCart = async (req, res) => {
     const product = await Product.findById(productId);
     if (!product) return res.status(404).json({ message: 'Product not found' });
 
-    // Compare using SKU
+    // Compare strictly using strings to avoid duplication
     const idx = user.cart.findIndex(i => {
-      const cartVariantSku = i.variant?.sku ?? null;
-      const reqVariantSku = variant ?? null;
-      return i.product.toString() === productId && cartVariantSku === reqVariantSku;
+      const cartProdId = String(i.product);
+      const reqProdId = String(productId);
+
+      const cartVariantSku = String(i.variant?.sku || "");
+      const reqVariantSku = String(variant || "");
+
+      return cartProdId === reqProdId && cartVariantSku === reqVariantSku;
     });
 
     // Resolve stock limit (Variant vs Base)
     let stockLimit = product.stock;
     if (variant) {
-      const vObj = product.variants.find(v => v.sku === variant);
+      const vObj = product.variants.find(v => v.sku === String(variant));
       if (vObj) stockLimit = vObj.stock;
     }
 
@@ -42,7 +46,7 @@ exports.addToCart = async (req, res) => {
       user.cart.push({
         product: productId,
         qty: Math.min(stockLimit, Math.max(1, Number(qty))),
-        variant: variant ? { sku: variant } : null
+        variant: variant ? { sku: String(variant) } : {}
       });
     }
 
@@ -64,11 +68,13 @@ exports.updateItem = async (req, res) => {
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ message: 'User not found' });
 
-    // Find cart item by productId + variant SKU
+    // Find cart item strictly
     const idx = user.cart.findIndex(i => {
-      const cartVariantSku = i.variant?.sku ?? null;
-      const reqVariantSku = variant ?? null;
-      return i.product.toString() === productId && cartVariantSku === reqVariantSku;
+      const cartProdId = String(i.product);
+      const reqProdId = String(productId);
+      const cartVariantSku = String(i.variant?.sku || "");
+      const reqVariantSku = String(variant || "");
+      return cartProdId === reqProdId && cartVariantSku === reqVariantSku;
     });
 
     if (idx === -1)
@@ -80,7 +86,7 @@ exports.updateItem = async (req, res) => {
     // Resolve stock limit
     let stockLimit = product.stock;
     if (variant) {
-      const vObj = product.variants.find(v => v.sku === variant);
+      const vObj = product.variants.find(v => v.sku === String(variant));
       if (vObj) stockLimit = vObj.stock;
     }
 
@@ -101,7 +107,9 @@ exports.removeItem = async (req, res) => {
   try {
     const { productId, variant = null } = req.body;
 
-    const pullQuery = variant ? { product: productId, 'variant.sku': variant } : { product: productId };
+    const pullQuery = variant
+      ? { product: productId, 'variant.sku': String(variant) }
+      : { product: productId, $or: [{ 'variant.sku': null }, { 'variant.sku': '' }] };
 
     const user = await User.findByIdAndUpdate(
       req.user.id,

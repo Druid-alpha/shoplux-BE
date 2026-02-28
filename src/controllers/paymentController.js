@@ -160,14 +160,19 @@ exports.paystackWebHook = async (req, res) => {
         const doc = new PDFDocument()
         const stream = fs.createWriteStream(tmpPath)
         doc.pipe(stream)
-        doc.fontSize(20).text('Invoice', { align: 'center' })
+        doc.fontSize(25).text('OFFICIAL INVOICE', { align: 'center' })
         doc.moveDown()
-        doc.fontSize(16).text(`Order ID: ${order._id}`)
-        doc.text(`Total: ₦${order.totalAmount}`)
+        doc.fontSize(12).text(`Order ID: ${order._id}`)
+        doc.text(`Date: ${new Date().toLocaleDateString()}`)
         doc.moveDown()
+        doc.text('--------------------------------------------------')
         order.items.forEach((item, i) => {
-          doc.text(`${i + 1}. ${item.title || item.product} × ${item.qty} - ₦${item.priceAtPurchase * item.qty}`)
+          const variantInfo = item.variant?.sku ? ` (${item.variant.sku})` : ''
+          doc.text(`${i + 1}. ${item.title || 'Product'}${variantInfo} x ${item.qty} - ₦${(item.priceAtPurchase * item.qty).toLocaleString()}`)
         })
+        doc.moveDown()
+        doc.text('--------------------------------------------------')
+        doc.fontSize(16).text(`TOTAL PAID: ₦${order.totalAmount.toLocaleString()}`, { align: 'right' })
         doc.end()
         stream.on('finish', resolve)
         stream.on('error', reject)
@@ -175,7 +180,7 @@ exports.paystackWebHook = async (req, res) => {
 
       const uploaded = await cloudinary.uploader.upload(tmpPath, {
         folder: 'invoices',
-        resource_type: 'raw',
+        resource_type: 'image',
         public_id: `invoice-${order._id}`,
         format: 'pdf'
       })
