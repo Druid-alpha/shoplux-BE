@@ -21,6 +21,7 @@ exports.addToCart = async (req, res) => {
     if (!product) return res.status(404).json({ message: 'Product not found' });
 
     // Compare strictly using strings to avoid duplication
+    // We normalize "no variant" to an empty string for comparison
     const idx = user.cart.findIndex(i => {
       const cartProdId = String(i.product);
       const reqProdId = String(productId);
@@ -46,7 +47,7 @@ exports.addToCart = async (req, res) => {
       user.cart.push({
         product: productId,
         qty: Math.min(stockLimit, Math.max(1, Number(qty))),
-        variant: variant ? { sku: String(variant) } : {}
+        variant: variant ? { sku: String(variant) } : {} // Store as object even if empty
       });
     }
 
@@ -107,15 +108,19 @@ exports.removeItem = async (req, res) => {
   try {
     const { productId, variant = null } = req.body;
 
-    const pullQuery = variant
-      ? { product: productId, 'variant.sku': String(variant) }
-      : { product: productId, $or: [{ 'variant.sku': null }, { 'variant.sku': '' }] };
+    // Use a more inclusive pull query to handle both null and empty variant objects
+    const variantSku = String(variant || "");
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
 
-    const user = await User.findByIdAndUpdate(
-      req.user.id,
-      { $pull: { cart: pullQuery } },
-      { new: true }
-    ).populate('cart.product');
+    user.cart = user.cart.filter(i => {
+      const isSameProd = String(i.product) === String(productId);
+      const isSameVariant = String(i.variant?.sku || "") === variantSku;
+      return !(isSameProd && isSameVariant);
+    });
+
+    await user.save();
+    await user.populate('cart.product');
 
     res.json({ cart: user.cart });
   } catch (error) {

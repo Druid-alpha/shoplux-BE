@@ -24,11 +24,9 @@ exports.createOrder = async (req, res) => {
       let price = product.price
       let variantData = null
 
-      if (cartItem.variant && cartItem.variant._id) {
-        const variantId = cartItem.variant._id.toString()
-
+      if (cartItem.variant && cartItem.variant.sku) {
         const variant = product.variants.find(
-          v => v._id.toString() === variantId
+          v => v.sku === cartItem.variant.sku
         )
 
         if (!variant) throw new Error('Variant not found')
@@ -37,10 +35,7 @@ exports.createOrder = async (req, res) => {
           throw new Error('Insufficient variant stock')
         }
 
-
-
         price = variant.price
-
         variantData = {
           _id: variant._id,
           sku: variant.sku,
@@ -51,8 +46,6 @@ exports.createOrder = async (req, res) => {
         if (product.stock < cartItem.qty) {
           throw new Error('Insufficient product stock')
         }
-
-
       }
 
       total += price * cartItem.qty
@@ -65,8 +58,7 @@ exports.createOrder = async (req, res) => {
         variant: variantData || null
       })
 
-      /* SAVE PRODUCT */
-      await product.save()
+      // We do NOT reduce stock here anymore. We reduce it in the webhook after payment.
     }
 
     const order = await Order.create({
@@ -79,50 +71,53 @@ exports.createOrder = async (req, res) => {
     user.cart = []
     await user.save()
 
-    // ---------------------------------------------------------
-    // Generate PDF invoice → write to /tmp (writable on Vercel)
-    // then upload to Cloudinary so the URL persists
-    // ---------------------------------------------------------
+    // ------------------ GENERATE PDF ------------------
     try {
       const invoiceName = `invoice-${order._id}.pdf`
       const tmpPath = path.join('/tmp', invoiceName)
 
+      const doc = new PDFDocument({ margin: 50 })
+      const stream = fs.createWriteStream(tmpPath)
+      doc.pipe(stream)
+
+      doc.fontSize(25).text('OFFICIAL INVOICE', { align: 'center' })
+      doc.moveDown()
+      doc.fontSize(12).text(`Order ID: ${order._id}`)
+      doc.text(`Date: ${new Date().toLocaleDateString('en-US', { dateStyle: 'full' })}`)
+      doc.text(`Customer: ${user.name} (${user.email})`)
+      doc.moveDown()
+      doc.text('-------------------------------------------------------------------------------')
+
+      orderItems.forEach((item, i) => {
+        const variantInfo = item.variant?.sku ? ` [${item.variant.sku}]` : ''
+        doc.text(`${i + 1}. ${item.title}${variantInfo}`)
+        doc.text(`   ${item.qty} x ₦${item.priceAtPurchase.toLocaleString()} = ₦${(item.priceAtPurchase * item.qty).toLocaleString()}`, { indent: 20 })
+        doc.moveDown(0.5)
+      })
+
+      doc.text('-------------------------------------------------------------------------------')
+      doc.moveDown()
+      doc.fontSize(16).text(`TOTAL AMOUNT: ₦${total.toLocaleString()}`, { align: 'right' })
+      doc.end()
+
+      // CRITICAL: wait for stream close before upload
       await new Promise((resolve, reject) => {
-        const doc = new PDFDocument()
-        const stream = fs.createWriteStream(tmpPath)
-        doc.pipe(stream)
-        doc.fontSize(25).text('OFFICIAL INVOICE', { align: 'center' })
-        doc.moveDown()
-        doc.fontSize(12).text(`Order ID: ${order._id}`)
-        doc.text(`Date: ${new Date().toLocaleDateString()}`)
-        doc.moveDown()
-        doc.text('--------------------------------------------------')
-        orderItems.forEach((item, i) => {
-          const variantInfo = item.variant?.sku ? ` (${item.variant.sku})` : ''
-          doc.text(`${i + 1}. ${item.title}${variantInfo} x ${item.qty} - ₦${(item.priceAtPurchase * item.qty).toLocaleString()}`)
-        })
-        doc.moveDown()
-        doc.text('--------------------------------------------------')
-        doc.fontSize(16).text(`TOTAL AMOUNT: ₦${total.toLocaleString()}`, { align: 'right' })
-        doc.end()
         stream.on('finish', resolve)
         stream.on('error', reject)
       })
 
       const uploaded = await cloudinary.uploader.upload(tmpPath, {
         folder: 'invoices',
-        resource_type: 'image', // ✅ Use image for PDFs to allow proper browser viewing
+        resource_type: 'auto', // Use auto for better PDF handling
         public_id: `invoice-${order._id}`,
-        format: 'pdf'
+        flags: 'attachment:false' // Ensure it previews in browser
       })
 
       order.invoiceUrl = uploaded.secure_url
       await order.save()
 
-      // Clean up tmp file
       fs.unlink(tmpPath, () => { })
     } catch (pdfErr) {
-      // Non-fatal – order is created, just log the PDF error
       console.error('Invoice generation failed:', pdfErr.message)
     }
 
@@ -145,11 +140,14 @@ exports.getMyOrder = async (req, res) => {
 
 exports.getOrderId = async (req, res) => {
   try {
-    const order = await Order.findById(req.params.id).populate('items.product')
+    const order = await Order.findById(req.params.id)
+      .populate('items.product')
+      .populate('user', 'email name')
+
     if (!order) return res.status(404).json({ message: 'Order not found' })
 
     const isAdmin = req.user.role === 'admin'
-    const isOwner = String(order.user) === String(req.user.id)
+    const isOwner = String(order.user._id || order.user) === String(req.user.id)
 
     if (!isOwner && !isAdmin) {
       return res.status(403).json({ message: 'Access denied' })
@@ -175,7 +173,6 @@ exports.getAllOrders = async (req, res) => {
     res.status(500).json({ message: 'Server error' })
   }
 }
-
 
 exports.updateOrderStatus = async (req, res) => {
   try {
