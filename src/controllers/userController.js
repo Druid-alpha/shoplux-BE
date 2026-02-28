@@ -67,7 +67,7 @@ exports.updateAvatar = async (req, res) => {
 // Get all users (admin only)
 exports.getUsers = async (req, res) => {
   try {
-    const users = await User.find().select('-password -refreshTokens')
+    const users = await User.find({ isDeleted: { $ne: true } }).select('-password -refreshTokens')
     res.json({ users })
   } catch (error) {
     console.error(error)

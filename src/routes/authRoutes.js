@@ -8,7 +8,6 @@ router.post(
   upload.single('avatar'), // ✅ ADD THIS LINE
   authCtrl.register
 )
-router.post('/register', authCtrl.register)
 router.post('/login', authCtrl.login)
 router.post('/refresh', authCtrl.refresh)
 router.post('/logout', authCtrl.logOut)

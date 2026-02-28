@@ -110,7 +110,7 @@ exports.paystackWebHook = async (req, res) => {
   session.startTransaction()
 
   try {
-    const order = await Order.findOne({ paymentRef: reference }).session(session)
+    const order = await Order.findOne({ paymentRef: reference }).populate('user').session(session)
     if (!order || order.status === 'paid') {
       await session.abortTransaction()
       return res.sendStatus(200)
@@ -191,19 +191,17 @@ exports.paystackWebHook = async (req, res) => {
     // ------------------ COMMIT ------------------
     await session.commitTransaction()
     session.endSession()
-    res.sendStatus(200)
 
-    // ------------------ OPTIONAL: SEND EMAIL NOTIFICATION ------------------
-     sendEmail(order.user.email, "Payment Successful", `Your order ${order._id} has been paid successfully.`)
-    await session.commitTransaction()
-    session.endSession()
-
-    // ------------------ OPTIONAL: SEND EMAIL NOTIFICATION ------------------
-    await sendEmail(
-      order.user.email,
-      "Payment Successful",
-      `Your payment for order ${order._id} has been successfully received. Thank you for shopping with us!`
-    );
+    // ------------------ SEND EMAIL NOTIFICATION ------------------
+    try {
+      await sendEmail(
+        order.user.email,
+        "Payment Successful",
+        `Your payment for order ${order._id} has been successfully received. Thank you for shopping with us!`
+      );
+    } catch (emailErr) {
+      console.error('Webhook email failed:', emailErr.message);
+    }
 
     res.sendStatus(200)
   } catch (error) {
