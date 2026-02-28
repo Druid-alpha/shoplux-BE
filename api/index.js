@@ -101,7 +101,9 @@ app.use('/api/payments', require('../src/routes/paymentRoutes'))
    HEALTH
 ------------------------------------------------- */
 
-app.get('/', (req, res) => res.json({ ok: true }))
+app.get('/api', (req, res) => res.json({ ok: true, source: 'api-root' }))
+app.get('/api/health', (req, res) => res.json({ ok: true, source: 'api-health' }))
+app.get('/', (req, res) => res.json({ ok: true, source: 'root' }))
 
 /* ------------------------------------------------
    ERROR HANDLER

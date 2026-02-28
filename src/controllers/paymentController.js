@@ -11,7 +11,7 @@ const paystack = require('../config/paystack')
 exports.initPaystackTransaction = async (req, res) => {
   try {
     const { orderId } = req.body
-    const userId = req.user.id  // ✅ was req.userId (always undefined)
+    const userId = req.user.id
 
     if (!orderId) {
       return res.status(400).json({ message: "Order ID is required" })
@@ -104,10 +104,15 @@ exports.paystackWebHook = async (req, res) => {
       const product = await Product.findById(item.product).session(session)
       if (!product) throw new Error('Product missing')
 
-      if (item.variant && item.variant.sku) {
-        const v = product.variants.find(v => v.sku === item.variant.sku)
+      if (item.variant && typeof item.variant === 'object' && item.variant.sku) {
+        const v = product.variants.find(val => val.sku === item.variant.sku)
         if (!v || v.stock < item.qty) {
           throw new Error('Variant stock insufficient')
+        }
+      } else if (item.variant && typeof item.variant === 'string') {
+        const v = product.variants.find(val => val.sku === item.variant)
+        if (!v || v.stock < item.qty) {
+          throw new Error('Legacy variant stock insufficient')
         }
       } else if (product.stock < item.qty) {
         throw new Error('Stock insufficient')
@@ -115,9 +120,15 @@ exports.paystackWebHook = async (req, res) => {
     }
 
     for (const item of order.items) {
-      if (item.variant && item.variant.sku) {
+      if (item.variant && typeof item.variant === 'object' && item.variant.sku) {
         await Product.updateOne(
           { _id: item.product, 'variants.sku': item.variant.sku },
+          { $inc: { 'variants.$.stock': -item.qty } },
+          { session }
+        )
+      } else if (item.variant && typeof item.variant === 'string') {
+        await Product.updateOne(
+          { _id: item.product, 'variants.sku': item.variant },
           { $inc: { 'variants.$.stock': -item.qty } },
           { session }
         )

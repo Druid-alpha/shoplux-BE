@@ -44,7 +44,7 @@ exports.createOrder = async (req, res) => {
         variantData = {
           _id: variant._id,
           name: variant.name,
-          sku: variant.sku, // ✅ ADDED SKU FOR STOCK SYNC
+          sku: variant.sku,
           price: variant.price
         }
       } else {
