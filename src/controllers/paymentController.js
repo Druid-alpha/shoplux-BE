@@ -104,8 +104,8 @@ exports.paystackWebHook = async (req, res) => {
       const product = await Product.findById(item.product).session(session)
       if (!product) throw new Error('Product missing')
 
-      if (item.variant) {
-        const v = product.variants.find(v => v.sku === item.variant)
+      if (item.variant && item.variant.sku) {
+        const v = product.variants.find(v => v.sku === item.variant.sku)
         if (!v || v.stock < item.qty) {
           throw new Error('Variant stock insufficient')
         }
@@ -115,9 +115,9 @@ exports.paystackWebHook = async (req, res) => {
     }
 
     for (const item of order.items) {
-      if (item.variant) {
+      if (item.variant && item.variant.sku) {
         await Product.updateOne(
-          { _id: item.product, 'variants.sku': item.variant },
+          { _id: item.product, 'variants.sku': item.variant.sku },
           { $inc: { 'variants.$.stock': -item.qty } },
           { session }
         )
