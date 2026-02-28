@@ -10,7 +10,11 @@ const crypto = require('crypto')
 const registerSchema = z.object({
     name: z.string().min(2),
     email: z.string().email(),
-    password: z.string().min(6)
+    password: z.string().min(6),
+    confirmPassword: z.string().min(6)
+}).refine(data => data.password === data.confirmPassword, {
+    message: "Passwords do not match",
+    path: ["confirmPassword"]
 })
 
 const loginSchema = z.object({
@@ -305,7 +309,7 @@ exports.me = async (req, res) => {
 exports.forgotPassword = async (req, res) => {
     try {
         const { email } = req.body
-         if (!email || email.trim() === '') {
+        if (!email || email.trim() === '') {
             return res.status(400).json({ message: 'Email field is required' })
         }
 
