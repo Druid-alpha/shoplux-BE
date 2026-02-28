@@ -1,11 +1,13 @@
 const crypto = require('crypto')
 const mongoose = require('mongoose')
 const Order = require('../models/order')
+const path = require('path')
 const Product = require('../models/product')
 const User = require('../models/user')
 const paystack = require('../config/paystack')
-
-
+const PDFDocument = require('pdfkit')
+const cloudinary = require('../config/cloudinary')
+const sendEmail = require('../utils/sendEmail')
 
 
 exports.initPaystackTransaction = async (req, res) => {
@@ -73,7 +75,10 @@ exports.initPaystackTransaction = async (req, res) => {
 }
 
 
+
+
 exports.paystackWebHook = async (req, res) => {
+  // ------------------ VERIFY SIGNATURE ------------------
   const hash = crypto
     .createHmac('sha512', process.env.PAYSTACK_SECRET_KEY)
     .update(req.body)
@@ -84,74 +89,127 @@ exports.paystackWebHook = async (req, res) => {
   }
 
   const event = JSON.parse(req.body.toString())
+  if (event.event === 'charge.failed') {
+    // Find the order by reference
+    const order = await Order.findOne({ paymentRef: event.data.reference });
+    if (order) {
+      order.paymentStatus = 'failed'; // <-- mark failed
+      order.status = 'failed';
+      await order.save();
 
-  if (event.event !== 'charge.success') {
-    return res.sendStatus(200)
+      // Optional: send email notification about failed payment
+      // sendEmail(order.user.email, "Payment Failed", `Your payment for order ${order._id} failed. Please try again.`);
+    }
+    return res.sendStatus(200);
   }
 
-  const ref = event.data.reference
+  if (event.event !== 'charge.success') return res.sendStatus(200);
+
+  const reference = event.data.reference
   const session = await mongoose.startSession()
   session.startTransaction()
 
   try {
-    const order = await Order.findOne({ paymentRef: ref }).session(session)
+    const order = await Order.findOne({ paymentRef: reference }).session(session)
     if (!order || order.status === 'paid') {
       await session.abortTransaction()
       return res.sendStatus(200)
     }
 
+    // ------------------ CHECK STOCK ------------------
     for (const item of order.items) {
       const product = await Product.findById(item.product).session(session)
       if (!product) throw new Error('Product missing')
 
-      if (item.variant && typeof item.variant === 'object' && item.variant.sku) {
-        const v = product.variants.find(val => val.sku === item.variant.sku)
-        if (!v || v.stock < item.qty) {
-          throw new Error('Variant stock insufficient')
+      if (item.variant && item.variant._id) {
+        const variant = product.variants.find(v => v._id.toString() === item.variant._id.toString())
+        if (!variant || variant.stock < item.qty) {
+          throw new Error(`Variant stock insufficient for ${variant?.name || 'unknown'}`)
         }
-      } else if (item.variant && typeof item.variant === 'string') {
-        const v = product.variants.find(val => val.sku === item.variant)
-        if (!v || v.stock < item.qty) {
-          throw new Error('Legacy variant stock insufficient')
-        }
-      } else if (product.stock < item.qty) {
-        throw new Error('Stock insufficient')
-      }
-    }
-
-    for (const item of order.items) {
-      if (item.variant && typeof item.variant === 'object' && item.variant.sku) {
-        await Product.updateOne(
-          { _id: item.product, 'variants.sku': item.variant.sku },
-          { $inc: { 'variants.$.stock': -item.qty } },
-          { session }
-        )
-      } else if (item.variant && typeof item.variant === 'string') {
-        await Product.updateOne(
-          { _id: item.product, 'variants.sku': item.variant },
-          { $inc: { 'variants.$.stock': -item.qty } },
-          { session }
-        )
       } else {
-        await Product.findByIdAndUpdate(
-          item.product,
-          { $inc: { stock: -item.qty } },
-          { session }
-        )
+        if (product.stock < item.qty) throw new Error(`Stock insufficient for ${product.title}`)
       }
     }
 
+    // ------------------ REDUCE STOCK ------------------
+    for (const item of order.items) {
+      const product = await Product.findById(item.product).session(session)
+      if (item.variant && item.variant._id) {
+        const idx = product.variants.findIndex(v => v._id.toString() === item.variant._id.toString())
+        if (idx !== -1) product.variants[idx].stock -= item.qty
+      } else {
+        product.stock -= item.qty
+      }
+      await product.save({ session })
+    }
+
+    // ------------------ UPDATE ORDER ------------------
     order.status = 'paid'
+    order.paymentStatus = 'paid'
     await order.save({ session })
+
+    // ------------------ CLEAR USER CART ------------------
     await User.findByIdAndUpdate(order.user, { cart: [] }, { session })
 
+    // ------------------ GENERATE PDF INVOICE ------------------
+    try {
+      const invoiceName = `invoice-${order._id}.pdf`
+      const tmpPath = path.join('/tmp', invoiceName)
+
+      await new Promise((resolve, reject) => {
+        const doc = new PDFDocument()
+        const stream = fs.createWriteStream(tmpPath)
+        doc.pipe(stream)
+        doc.fontSize(20).text('Invoice', { align: 'center' })
+        doc.moveDown()
+        doc.fontSize(16).text(`Order ID: ${order._id}`)
+        doc.text(`Total: ₦${order.totalAmount}`)
+        doc.moveDown()
+        order.items.forEach((item, i) => {
+          doc.text(`${i + 1}. ${item.title || item.product} × ${item.qty} - ₦${item.priceAtPurchase * item.qty}`)
+        })
+        doc.end()
+        stream.on('finish', resolve)
+        stream.on('error', reject)
+      })
+
+      const uploaded = await cloudinary.uploader.upload(tmpPath, {
+        folder: 'invoices',
+        resource_type: 'raw',
+        public_id: `invoice-${order._id}`,
+        format: 'pdf'
+      })
+
+      order.invoiceUrl = uploaded.secure_url
+      await order.save({ session })
+
+      fs.unlink(tmpPath, () => { })
+    } catch (pdfErr) {
+      console.error('Invoice generation failed:', pdfErr.message)
+    }
+
+    // ------------------ COMMIT ------------------
     await session.commitTransaction()
     session.endSession()
+    res.sendStatus(200)
+
+    // ------------------ OPTIONAL: SEND EMAIL NOTIFICATION ------------------
+     sendEmail(order.user.email, "Payment Successful", `Your order ${order._id} has been paid successfully.`)
+    await session.commitTransaction()
+    session.endSession()
+
+    // ------------------ OPTIONAL: SEND EMAIL NOTIFICATION ------------------
+    await sendEmail(
+      order.user.email,
+      "Payment Successful",
+      `Your payment for order ${order._id} has been successfully received. Thank you for shopping with us!`
+    );
+
     res.sendStatus(200)
   } catch (error) {
     await session.abortTransaction()
     session.endSession()
-    console.error('Webhook error:', error.message)
+    console.error('Webhook processing failed:', error.message)
     res.sendStatus(500)
   }
 }

@@ -305,6 +305,10 @@ exports.me = async (req, res) => {
 exports.forgotPassword = async (req, res) => {
     try {
         const { email } = req.body
+         if (!email || email.trim() === '') {
+            return res.status(400).json({ message: 'Email field is required' })
+        }
+
         const user = await User.findOne({ email })
 
         // Do NOT reveal if user exists (security best practice)
