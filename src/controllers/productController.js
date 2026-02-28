@@ -39,20 +39,20 @@ const normalizeVariants = (variants = []) =>
   }))
 
 
- 
- 
+
+
 
 // Build Mongo query from request safely
 const buildQueryFromReq = async (req, { admin = false } = {}) => {
 
-  
+
   const q = {}
   if (!admin) q.isDeleted = false
   const andConditions = []
 
   // 🛑 SURGICAL FIX #2
-// Prevent clothingType from applying outside clothing category
-// CLOTHING TYPE (SAFE – NEVER KILLS RESULTS)
+  // Prevent clothingType from applying outside clothing category
+  // CLOTHING TYPE (SAFE – NEVER KILLS RESULTS)
 
 
 
@@ -70,74 +70,74 @@ const buildQueryFromReq = async (req, { admin = false } = {}) => {
 
   // Category
   // -----------------------
-// CATEGORY (ID OR NAME)
-// -----------------------
-if (req.query.category && req.query.category !== 'all') {
-  let categoryId = null
+  // CATEGORY (ID OR NAME)
+  // -----------------------
+  if (req.query.category && req.query.category !== 'all') {
+    let categoryId = null
 
-  if (isValidObjectId(req.query.category)) {
-    categoryId = toObjectId(req.query.category)
-  } else {
-    const category = await Category.findOne({
-      name: new RegExp(`^${req.query.category}$`, 'i')
-    }).select('_id')
-    if (category) categoryId = category._id
+    if (isValidObjectId(req.query.category)) {
+      categoryId = toObjectId(req.query.category)
+    } else {
+      const category = await Category.findOne({
+        name: new RegExp(`^${req.query.category}$`, 'i')
+      }).select('_id')
+      if (category) categoryId = category._id
+    }
+
+    if (categoryId) {
+      andConditions.push({ category: categoryId })
+    }
   }
 
-  if (categoryId) {
-    andConditions.push({ category: categoryId })
+  const clothingType =
+    req.query.clothingType && req.query.clothingType !== 'all'
+      ? req.query.clothingType
+      : null;
+  // Clothing Type filter
+  // Clothing Type filter (FIXED)
+  // ✅ STRICT clothingType filter (FINAL FIX)
+
+  // -----------------------
+  // CLOTHING TYPE (SAFE)
+  // -----------------------
+  // if (req.query.clothingType && req.query.clothingType !== 'all') {
+  //   let category = null
+
+  //   if (req.query.category) {
+  //     if (isValidObjectId(req.query.category)) {
+  //       category = await Category.findById(req.query.category).select('name')
+  //     } else {
+  //       category = await Category.findOne({
+  //         name: new RegExp(`^${req.query.category}$`, 'i')
+  //       }).select('name')
+  //     }
+  //   }
+
+  //   if (category?.name?.toLowerCase() === 'clothing') {
+  //     andConditions.push({ clothingType: req.query.clothingType })
+  //   }
+  // }
+
+  // ✅ FINAL clothingType filter (ID OR NAME SAFE)
+  if (
+    req.query.clothingType &&
+    req.query.clothingType !== 'all' &&
+    req.query.category
+  ) {
+    let category = null
+
+    if (isValidObjectId(req.query.category)) {
+      category = await Category.findById(req.query.category).select('name')
+    } else {
+      category = await Category.findOne({
+        name: new RegExp(`^${req.query.category}$`, 'i')
+      }).select('name')
+    }
+
+    if (category?.name?.toLowerCase() === 'clothing') {
+      andConditions.push({ clothingType: req.query.clothingType })
+    }
   }
-}
-
-const clothingType =
-  req.query.clothingType && req.query.clothingType !== 'all'
-    ? req.query.clothingType
-    : null;
-// Clothing Type filter
-// Clothing Type filter (FIXED)
-// ✅ STRICT clothingType filter (FINAL FIX)
-
-// -----------------------
-// CLOTHING TYPE (SAFE)
-// -----------------------
-// if (req.query.clothingType && req.query.clothingType !== 'all') {
-//   let category = null
-
-//   if (req.query.category) {
-//     if (isValidObjectId(req.query.category)) {
-//       category = await Category.findById(req.query.category).select('name')
-//     } else {
-//       category = await Category.findOne({
-//         name: new RegExp(`^${req.query.category}$`, 'i')
-//       }).select('name')
-//     }
-//   }
-
-//   if (category?.name?.toLowerCase() === 'clothing') {
-//     andConditions.push({ clothingType: req.query.clothingType })
-//   }
-// }
-
-// ✅ FINAL clothingType filter (ID OR NAME SAFE)
-if (
-  req.query.clothingType &&
-  req.query.clothingType !== 'all' &&
-  req.query.category
-) {
-  let category = null
-
-  if (isValidObjectId(req.query.category)) {
-    category = await Category.findById(req.query.category).select('name')
-  } else {
-    category = await Category.findOne({
-      name: new RegExp(`^${req.query.category}$`, 'i')
-    }).select('name')
-  }
-
-  if (category?.name?.toLowerCase() === 'clothing') {
-    andConditions.push({ clothingType: req.query.clothingType })
-  }
-}
 
 
 
@@ -164,25 +164,25 @@ if (
   }
 
   // Price Range
- if (req.query.minPrice || req.query.maxPrice) {
-  const priceQuery = {}
-  if (req.query.minPrice) priceQuery.$gte = Number(req.query.minPrice)
-  if (req.query.maxPrice) priceQuery.$lte = Number(req.query.maxPrice)
+  if (req.query.minPrice || req.query.maxPrice) {
+    const priceQuery = {}
+    if (req.query.minPrice) priceQuery.$gte = Number(req.query.minPrice)
+    if (req.query.maxPrice) priceQuery.$lte = Number(req.query.maxPrice)
 
-  andConditions.push({
-    $or: [
-      // products WITHOUT variants → use base price
-      {
-        variants: { $size: 0 },
-        price: priceQuery
-      },
-      // products WITH variants → use variant prices ONLY
-      {
-        'variants.price': priceQuery
-      }
-    ]
-  })
-}
+    andConditions.push({
+      $or: [
+        // products WITHOUT variants → use base price
+        {
+          variants: { $size: 0 },
+          price: priceQuery
+        },
+        // products WITH variants → use variant prices ONLY
+        {
+          'variants.price': priceQuery
+        }
+      ]
+    })
+  }
 
 
   if (andConditions.length > 0) q.$and = andConditions
@@ -196,22 +196,22 @@ if (
 ===================================================== */
 
 const variantSchema = z.object({
- sku: z.string().min(3),
+  sku: z.string().min(3),
   options: z.object({
     color: objectId().optional(),
     size: z.string().optional()
   }),
   price: z.coerce.number().min(0),
   stock: z.coerce.number().min(0),
- 
+
 
   image: z
-  .object({
-    url: z.string(),
-    public_id: z.string()
-  })
-  .optional()
-  .nullable()
+    .object({
+      url: z.string(),
+      public_id: z.string()
+    })
+    .optional()
+    .nullable()
 
 
 })
@@ -219,17 +219,17 @@ const variantSchema = z.object({
 const createSchema = z.object({
   title: z.string().min(3),
   description: z.string().min(10),
- price: z.coerce.number().min(0).optional(),
-   sku: z.string().optional(),
+  price: z.coerce.number().min(0).optional(),
+  sku: z.string().optional(),
 
   category: objectId(),
   color: objectId().optional(),
   brand: objectId().optional(),
   tags: z.array(z.string()).optional(),
-stock: z.coerce.number().min(0).optional(),
-discount: z.coerce.number().min(0).optional(),
+  stock: z.coerce.number().min(0).optional(),
+  discount: z.coerce.number().min(0).optional(),
   featured: z.boolean().optional(),
-   clothingType: z.enum(['clothes','shoes','bag','eyeglass']).optional(),
+  clothingType: z.enum(['clothes', 'shoes', 'bag', 'eyeglass']).optional(),
   variants: z.array(variantSchema).optional()
 })
 
@@ -240,12 +240,12 @@ const updateSchema = createSchema.partial().extend({
     .optional()
     .or(z.literal(''))
     .transform(v => (v === '' ? undefined : v)),
-color: z
-  .string()
-  .regex(/^[0-9a-fA-F]{24}$/)
-  .optional()
-  .or(z.literal(''))
-  .transform(v => (v === '' ? undefined : v)),
+  color: z
+    .string()
+    .regex(/^[0-9a-fA-F]{24}$/)
+    .optional()
+    .or(z.literal(''))
+    .transform(v => (v === '' ? undefined : v)),
 
   category: z
     .string()
@@ -253,7 +253,7 @@ color: z
     .optional()
     .or(z.literal(''))
     .transform(v => (v === '' ? undefined : v)),
-    price: z.coerce.number().min(0).optional(),
+  price: z.coerce.number().min(0).optional(),
   stock: z.coerce.number().min(0).optional(),
   discount: z.coerce.number().min(0).optional(),
 })
@@ -302,12 +302,8 @@ exports.getFilterOptions = async (req, res) => {
         ? req.query.clothingType
         : null;
 
-    // Colors (category-specific or global)
-    colors = categoryId
-      ? await Color.find({
-          $or: [{ category: categoryId }, { category: null }],
-        }).select('_id name hex')
-      : await Color.find().select('_id name hex');
+    // Colors - make them global so they show for all categories
+    colors = await Color.find().select('_id name hex');
 
     if (categoryId) {
       const category = await Category.findById(categoryId);
@@ -330,7 +326,7 @@ exports.getFilterOptions = async (req, res) => {
 
         // Sizes by type
         if (clothingType === 'clothes') sizes = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
-        else if (clothingType === 'shoes') sizes = ['38','39','40','41','42','43','44','45'];
+        else if (clothingType === 'shoes') sizes = ['38', '39', '40', '41', '42', '43', '44', '45'];
         else sizes = [];
       } else {
         // Non-clothing categories → brands filtered by category OR global
@@ -374,24 +370,24 @@ exports.listProducts = async (req, res) => {
       .skip((page - 1) * limit)
       .limit(limit)
       .sort(sortBy)
-const productsWithStock = products.map(prod => {
-  const totalStock = prod.variants?.length
-    ? prod.variants.reduce((sum, v) => sum + (v.stock || 0), 0)
-    : prod.stock || 0;
+    const productsWithStock = products.map(prod => {
+      const totalStock = prod.variants?.length
+        ? prod.variants.reduce((sum, v) => sum + (v.stock || 0), 0)
+        : prod.stock || 0;
 
-  return {
-    ...prod.toObject(),
-    totalStock,
-    isOutOfStock: totalStock <= 0
-  };
-});
+      return {
+        ...prod.toObject(),
+        totalStock,
+        isOutOfStock: totalStock <= 0
+      };
+    });
 
-res.json({
-  products: productsWithStock,
-  total,
-  page,
-  pages: Math.ceil(total / limit)
-});
+    res.json({
+      products: productsWithStock,
+      total,
+      page,
+      pages: Math.ceil(total / limit)
+    });
   } catch (err) {
     console.error(err)
     res.status(500).json({ message: 'Failed to list products' })
@@ -480,22 +476,22 @@ exports.getProduct = async (req, res) => {
       return res.status(404).json({ message: 'Product not found' })
     }
 
-   // Calculate total stock dynamically
-let totalStock = 0;
+    // Calculate total stock dynamically
+    let totalStock = 0;
 
-if (product.variants?.length > 0) {
-  totalStock = product.variants.reduce((sum, v) => sum + (v.stock || 0), 0);
-} else {
-  totalStock = product.stock || 0;
-}
+    if (product.variants?.length > 0) {
+      totalStock = product.variants.reduce((sum, v) => sum + (v.stock || 0), 0);
+    } else {
+      totalStock = product.stock || 0;
+    }
 
-res.json({
-  product: {
-    ...product.toObject(),
-    totalStock,
-    isOutOfStock: totalStock <= 0
-  }
-});
+    res.json({
+      product: {
+        ...product.toObject(),
+        totalStock,
+        isOutOfStock: totalStock <= 0
+      }
+    });
   } catch (err) {
     console.error(err)
     res.status(500).json({ message: 'Failed to get product' })
@@ -510,7 +506,7 @@ exports.adminListProducts = async (req, res) => {
   try {
     const page = Math.max(1, Number(req.query.page || 1))
     const limit = Math.min(200, Number(req.query.limit || 50))
-   const query = await buildQueryFromReq(req, { admin: true })
+    const query = await buildQueryFromReq(req, { admin: true })
     const total = await Product.countDocuments(query)
     const products = await Product.find(query)
       .populate('brand category variants.options.color color createdBy', 'name email')
@@ -522,8 +518,8 @@ exports.adminListProducts = async (req, res) => {
       products,
       total,
       page,
-      pages: Math.ceil(total / limit) 
-       
+      pages: Math.ceil(total / limit)
+
     })
   } catch (err) {
     console.error(err)
@@ -572,32 +568,32 @@ exports.createProduct = async (req, res) => {
     })
 
     if (!data.variants?.length && data.price === undefined) {
-  return res.status(400).json({
-    message: 'Price is required when no variants exist'
-  })
-}
+      return res.status(400).json({
+        message: 'Price is required when no variants exist'
+      })
+    }
 
     if (data.clothingType === 'shoes') {
-  if (data.variants?.some(v => isNaN(Number(v.options?.size)))) {
-    return res.status(400).json({ message: 'Shoe sizes must be numbers' })
-  }
-}
+      if (data.variants?.some(v => isNaN(Number(v.options?.size)))) {
+        return res.status(400).json({ message: 'Shoe sizes must be numbers' })
+      }
+    }
 
-if (data.clothingType === 'clothes') {
-  const allowed = ['XS','S','M','L','XL','XXL']
-  if (data.variants?.some(v => v.options?.size && !allowed.includes(v.options.size))) {
-    return res.status(400).json({ message: 'Invalid clothing size' })
-  }
-}
+    if (data.clothingType === 'clothes') {
+      const allowed = ['XS', 'S', 'M', 'L', 'XL', 'XXL']
+      if (data.variants?.some(v => v.options?.size && !allowed.includes(v.options.size))) {
+        return res.status(400).json({ message: 'Invalid clothing size' })
+      }
+    }
 
-if (data.clothingType) {
-  const category = await Category.findById(data.category).select('name')
-  if (!category || category.name.toLowerCase() !== 'clothing') {
-    return res.status(400).json({
-      message: 'clothingType is only allowed for clothing category'
-    })
-  }
-}
+    if (data.clothingType) {
+      const category = await Category.findById(data.category).select('name')
+      if (!category || category.name.toLowerCase() !== 'clothing') {
+        return res.status(400).json({
+          message: 'clothingType is only allowed for clothing category'
+        })
+      }
+    }
 
     /* =======================
        VALIDATE BRAND ↔ CATEGORY
@@ -608,14 +604,14 @@ if (data.clothingType) {
         category: data.category,
         isActive: true,
       })
-//  if (
-//   data.variants?.some(v => v.options?.size) &&
-//   !['clothes', 'shoes'].includes(data.clothingType)
-// ) {
-//   return res.status(400).json({
-//     message: 'Sizes are only allowed for clothes or shoes'
-//   })
-// }
+      //  if (
+      //   data.variants?.some(v => v.options?.size) &&
+      //   !['clothes', 'shoes'].includes(data.clothingType)
+      // ) {
+      //   return res.status(400).json({
+      //     message: 'Sizes are only allowed for clothes or shoes'
+      //   })
+      // }
 
 
 
@@ -625,71 +621,71 @@ if (data.clothingType) {
         })
       }
     }
-if (data.variants?.length > 0) {
-  data.stock = 0
-}
+    if (data.variants?.length > 0) {
+      data.stock = 0
+    }
 
-if (!data.variants?.length && data.stock === undefined) {
-  data.stock = 0
-}
-if (!data.sku) {
-  data.sku = `${data.title
-    .toUpperCase()
-    .replace(/\s+/g, '-')}-${Date.now()}`
-}
+    if (!data.variants?.length && data.stock === undefined) {
+      data.stock = 0
+    }
+    if (!data.sku) {
+      data.sku = `${data.title
+        .toUpperCase()
+        .replace(/\s+/g, '-')}-${Date.now()}`
+    }
 
     /* =======================
        MAIN PRODUCT IMAGES
     ======================= */
-   /* =======================
-   MAIN PRODUCT IMAGES
-======================= */
-const images = []
+    /* =======================
+    MAIN PRODUCT IMAGES
+ ======================= */
+    const images = []
 
-if (Array.isArray(req.files)) {
-  const mainImages = req.files.filter(
-    f => !f.fieldname.startsWith('variant_')
-  )
+    if (Array.isArray(req.files)) {
+      const mainImages = req.files.filter(
+        f => !f.fieldname.startsWith('variant_')
+      )
 
-  for (const file of mainImages) {
-    const uploaded = await uploadToCloudinary(
-      file.buffer,
-      'products'
-    )
+      for (const file of mainImages) {
+        const uploaded = await uploadToCloudinary(
+          file.buffer,
+          'products'
+        )
 
-    images.push({
-      url: uploaded.secure_url,
-      public_id: uploaded.public_id
-    })
-  }
-}
-
-/* =======================
-   VARIANT IMAGES
-======================= */
-
-// =======================
-// VARIANT IMAGES
-// =======================
-const variantFiles = req.files?.filter(f => f.fieldname.startsWith('variant_')) || [];
-
-const uploadedVariants = await Promise.all(
-  parsedVariants.map(async (variant, idx) => {
-    const file = variantFiles.find(f => f.fieldname === `variant_${idx}`);
-    let image = variant.image || null;
-
-    if (file) {
-      const uploaded = await uploadToCloudinary(file.buffer, 'variants');
-      image = { url: uploaded.secure_url, public_id: uploaded.public_id };
+        images.push({
+          url: uploaded.secure_url,
+          public_id: uploaded.public_id
+        })
+      }
     }
 
-    return { ...variant, image };
-  })
-);
+    /* =======================
+       VARIANT IMAGES
+    ======================= */
 
-data.variants = uploadedVariants;
+    // =======================
+    // VARIANT IMAGES
+    // =======================
+    const variantFiles = req.files?.filter(f => f.fieldname.startsWith('variant_')) || [];
 
-// then save
+    const uploadedVariants = await Promise.all(
+      parsedVariants.map(async (variant, idx) => {
+        const file = variantFiles.find(f => f.fieldname === `variant_${idx}`);
+        let image = variant.image || null;
+
+        if (file) {
+          const uploaded = await uploadToCloudinary(file.buffer, 'variants');
+          image = { url: uploaded.secure_url, public_id: uploaded.public_id };
+        }
+
+        return { ...variant, image };
+      })
+    );
+
+    data.variants = uploadedVariants;
+
+    // then save
 
 
 
@@ -704,8 +700,8 @@ data.variants = uploadedVariants;
       stock: data.stock,
       category: toObjectId(data.category),
       brand: data.brand ? toObjectId(data.brand) : null,
-       color: data.color ? toObjectId(data.color) : null,
-       clothingType: data.clothingType || null,
+      color: data.color ? toObjectId(data.color) : null,
+      clothingType: data.clothingType || null,
       tags: data.tags,
       discount: data.discount,
       featured: data.featured,
@@ -716,10 +712,10 @@ data.variants = uploadedVariants;
       reviewsCount: 0,
       createdBy: req.user.id,
     })
-if (product.variants.length) {
-  product.price = Math.min(...product.variants.map(v => v.price))
-  await product.save()
-}
+    if (product.variants.length) {
+      product.price = Math.min(...product.variants.map(v => v.price))
+      await product.save()
+    }
 
     res.status(201).json({ product })
   } catch (err) {
@@ -743,8 +739,8 @@ exports.updateProduct = async (req, res) => {
     const { id } = req.params
 
     if (!isValidObjectId(id)) {
-  return res.status(400).json({ message: 'Invalid product id' })
-}
+      return res.status(400).json({ message: 'Invalid product id' })
+    }
 
 
     const payload = req.body.payload
@@ -775,26 +771,26 @@ exports.updateProduct = async (req, res) => {
     fields.forEach(f => {
       if (data[f] !== undefined) update.$set[f] = data[f]
     })
-if (
-  data.price !== undefined &&
-  (!existingProduct.variants || existingProduct.variants.length === 0)
-) {
-  update.$set.price = data.price
-}
+    if (
+      data.price !== undefined &&
+      (!existingProduct.variants || existingProduct.variants.length === 0)
+    ) {
+      update.$set.price = data.price
+    }
 
     if (data.clothingType || data.category) {
-  const categoryId = data.category || existingProduct.category
-  const category = await Category.findById(categoryId).select('name')
+      const categoryId = data.category || existingProduct.category
+      const category = await Category.findById(categoryId).select('name')
 
-  if (
-    data.clothingType &&
-    (!category || category.name.toLowerCase() !== 'clothing')
-  ) {
-    return res.status(400).json({
-      message: 'clothingType is only allowed for clothing category'
-    })
-  }
-}
+      if (
+        data.clothingType &&
+        (!category || category.name.toLowerCase() !== 'clothing')
+      ) {
+        return res.status(400).json({
+          message: 'clothingType is only allowed for clothing category'
+        })
+      }
+    }
 
     if (data.brand && mongoose.isValidObjectId(data.brand)) {
       update.$set.brand = data.brand
@@ -803,13 +799,13 @@ if (
     if (data.category && mongoose.isValidObjectId(data.category)) {
       update.$set.category = data.category
     }
-// When updating
-if (data.color && mongoose.isValidObjectId(data.color)) {
-  update.$set.color = data.color
-}
-if (data.clothingType) {
-  update.$set.clothingType = data.clothingType
-}
+    // When updating
+    if (data.color && mongoose.isValidObjectId(data.color)) {
+      update.$set.color = data.color
+    }
+    if (data.clothingType) {
+      update.$set.clothingType = data.clothingType
+    }
 
     /* =======================
        MAIN PRODUCT IMAGES
@@ -817,18 +813,18 @@ if (data.clothingType) {
     if (Array.isArray(req.files) && req.files.length > 0) {
       // 🔥 Delete old images
       if (existingProduct.images?.length) {
-  await Promise.all(
-    existingProduct.images.map(async img => {
-      if (img.public_id) {
-        try {
-          await cloudinary.uploader.destroy(img.public_id)
-        } catch (err) {
-          console.warn('Failed to delete image from Cloudinary:', img.public_id, err.message)
-        }
+        await Promise.all(
+          existingProduct.images.map(async img => {
+            if (img.public_id) {
+              try {
+                await cloudinary.uploader.destroy(img.public_id)
+              } catch (err) {
+                console.warn('Failed to delete image from Cloudinary:', img.public_id, err.message)
+              }
+            }
+          })
+        )
       }
-    })
-  )
-}
 
 
 
@@ -853,27 +849,27 @@ if (data.clothingType) {
       update.$set.images = images
     }
 
- if (Array.isArray(data.variants)) {
-  const existingVariants = existingProduct.variants || []
+    if (Array.isArray(data.variants)) {
+      const existingVariants = existingProduct.variants || []
 
-  const updatedVariants = await Promise.all(
-    data.variants.map(async (variant, idx) => {
-      const existing = existingVariants.find(v => v.sku === variant.sku);
-      let image = existing?.image || null;
+      const updatedVariants = await Promise.all(
+        data.variants.map(async (variant, idx) => {
+          const existing = existingVariants.find(v => v.sku === variant.sku);
+          let image = existing?.image || null;
 
-      const file = req.files?.find(f => f.fieldname === `variant_${idx}`);
-      if (file) {
-        if (image?.public_id) await cloudinary.uploader.destroy(image.public_id);
-        const uploaded = await uploadToCloudinary(file.buffer, 'variants');
-        image = { url: uploaded.secure_url, public_id: uploaded.public_id };
-      }
+          const file = req.files?.find(f => f.fieldname === `variant_${idx}`);
+          if (file) {
+            if (image?.public_id) await cloudinary.uploader.destroy(image.public_id);
+            const uploaded = await uploadToCloudinary(file.buffer, 'variants');
+            image = { url: uploaded.secure_url, public_id: uploaded.public_id };
+          }
 
-      return { ...variant, image };
-    })
-  );
+          return { ...variant, image };
+        })
+      );
 
-  update.$set.variants = normalizeVariants(updatedVariants);
-}
+      update.$set.variants = normalizeVariants(updatedVariants);
+    }
 
 
 
@@ -883,11 +879,11 @@ if (data.clothingType) {
       update,
       { new: true, runValidators: true }
     )
-product.price = product.variants?.length
-  ? Math.min(...product.variants.map(v => v.price))
-  : product.price;
+    product.price = product.variants?.length
+      ? Math.min(...product.variants.map(v => v.price))
+      : product.price;
 
-  await product.save()
+    await product.save()
 
 
     res.json({ product })
@@ -906,9 +902,9 @@ exports.updateVariants = async (req, res) => {
   try {
     const { id } = req.params
 
-   if (!isValidObjectId(id)) {
-  return res.status(400).json({ message: 'Invalid product id' })
-}
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({ message: 'Invalid product id' })
+    }
 
 
     const payload = req.body.payload
@@ -936,12 +932,12 @@ exports.updateVariants = async (req, res) => {
         if (file) {
           // 🔥 delete old variant image
           if (image.public_id) {
-  try {
-    await cloudinary.uploader.destroy(image.public_id)
-  } catch (err) {
-    console.warn('Failed to delete variant image from Cloudinary:', image.public_id, err.message)
-  }
-}
+            try {
+              await cloudinary.uploader.destroy(image.public_id)
+            } catch (err) {
+              console.warn('Failed to delete variant image from Cloudinary:', image.public_id, err.message)
+            }
+          }
 
           const uploaded = await uploadToCloudinary(
             file.buffer,
@@ -990,32 +986,32 @@ exports.deleteProduct = async (req, res) => {
     }
 
     // Delete main images from Cloudinary
-   if (product.images?.length) {
-  await Promise.all(
-    product.images.map(async (img) => {
-      if (img.public_id) {
-        try {
-          await cloudinary.uploader.destroy(img.public_id)
-        } catch (err) {
-          console.warn('Failed to delete image from Cloudinary:', err.message)
-        }
-      }
-    })
-  )
-}
+    if (product.images?.length) {
+      await Promise.all(
+        product.images.map(async (img) => {
+          if (img.public_id) {
+            try {
+              await cloudinary.uploader.destroy(img.public_id)
+            } catch (err) {
+              console.warn('Failed to delete image from Cloudinary:', err.message)
+            }
+          }
+        })
+      )
+    }
 
     // Delete variant images from Cloudinary
     await Promise.all(
-  product.variants.map(async v => {
-    if (v.image?.public_id) {
-      try {
-        await cloudinary.uploader.destroy(v.image.public_id)
-      } catch (err) {
-        console.warn('Failed to delete variant image from Cloudinary:', v.image.public_id, err.message)
-      }
-    }
-  })
-)
+      product.variants.map(async v => {
+        if (v.image?.public_id) {
+          try {
+            await cloudinary.uploader.destroy(v.image.public_id)
+          } catch (err) {
+            console.warn('Failed to delete variant image from Cloudinary:', v.image.public_id, err.message)
+          }
+        }
+      })
+    )
 
     // Soft delete the product
     product.isDeleted = true
