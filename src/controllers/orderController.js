@@ -17,57 +17,57 @@ exports.createOrder = async (req, res) => {
     let total = 0
     const orderItems = []
 
-   for (const cartItem of user.cart) {
-  const product = await Product.findById(cartItem.product)
-  if (!product) throw new Error('Product not found')
+    for (const cartItem of user.cart) {
+      const product = await Product.findById(cartItem.product)
+      if (!product) throw new Error('Product not found')
 
-  let price = product.price
-  let variantData = null
+      let price = product.price
+      let variantData = null
 
-  if (cartItem.variant && cartItem.variant._id) {
-    const variantId = cartItem.variant._id.toString()
+      if (cartItem.variant && cartItem.variant._id) {
+        const variantId = cartItem.variant._id.toString()
 
-    const variant = product.variants.find(
-      v => v._id.toString() === variantId
-    )
+        const variant = product.variants.find(
+          v => v._id.toString() === variantId
+        )
 
-    if (!variant) throw new Error('Variant not found')
+        if (!variant) throw new Error('Variant not found')
 
-    if (variant.stock < cartItem.qty) {
-      throw new Error('Insufficient variant stock')
+        if (variant.stock < cartItem.qty) {
+          throw new Error('Insufficient variant stock')
+        }
+
+
+
+        price = variant.price
+
+        variantData = {
+          _id: variant._id,
+          sku: variant.sku,
+          price: variant.price
+        }
+
+      } else {
+        if (product.stock < cartItem.qty) {
+          throw new Error('Insufficient product stock')
+        }
+
+
+      }
+
+      total += price * cartItem.qty
+
+      orderItems.push({
+        product: product._id,
+        title: product.title,
+        qty: cartItem.qty,
+        priceAtPurchase: price,
+        variant: variantData || null
+      })
+
+      /* SAVE PRODUCT */
+      await product.save()
     }
-
-   
-
-    price = variant.price
-
-    variantData = {
-      _id: variant._id,
-      sku: variant.sku,
-      price: variant.price
-    }
-
-  } else {
-    if (product.stock < cartItem.qty) {
-      throw new Error('Insufficient product stock')
-    }
-
-   
-  }
-
-  total += price * cartItem.qty
-
-  orderItems.push({
-    product: product._id,
-    title: product.title,
-    qty: cartItem.qty,
-    priceAtPurchase: price,
-    variant: variantData || null
-  })
-
-  /* SAVE PRODUCT */
-  await product.save()
-}
 
     const order = await Order.create({
       user: req.user.id,
@@ -142,7 +142,14 @@ exports.getOrderId = async (req, res) => {
   try {
     const order = await Order.findById(req.params.id).populate('items.product')
     if (!order) return res.status(404).json({ message: 'Order not found' })
-    if (order.user.toString() !== req.user.id) return res.status(403).json({ message: 'Access denied' })
+
+    const isOwner = order.user.toString() === req.user.id.toString()
+    const isAdmin = req.user.role === 'admin'
+
+    if (!isOwner && !isAdmin) {
+      return res.status(403).json({ message: 'Access denied' })
+    }
+
     res.json({ order })
   } catch (error) {
     console.error(error)

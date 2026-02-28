@@ -11,65 +11,89 @@ exports.getCart = async (req, res) => {
 
 /* ================= ADD TO CART ================= */
 exports.addToCart = async (req, res) => {
-  const { productId, qty = 1, variant = null } = req.body;
+  try {
+    const { productId, qty = 1, variant = null } = req.body;
 
-  const user = await User.findById(req.user.id);
-  if (!user) return res.status(404).json({ message: 'User not found' });
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
 
-  const product = await Product.findById(productId);
-  if (!product) return res.status(404).json({ message: 'Product not found' });
+    const product = await Product.findById(productId);
+    if (!product) return res.status(404).json({ message: 'Product not found' });
 
-  // Compare using SKU
-  const idx = user.cart.findIndex(i => {
-    const cartVariantSku = i.variant?.sku ?? null;
-    const reqVariantSku = variant ?? null;
-    return i.product.toString() === productId && cartVariantSku === reqVariantSku;
-  });
-
-  if (idx >= 0) {
-    // increment qty safely
-    user.cart[idx].qty = Math.min(product.stock, user.cart[idx].qty + Number(qty));
-  } else {
-    // add new item
-    user.cart.push({
-      product: productId,
-      qty: Math.max(1, Number(qty)),
-      variant: variant ? { sku: variant } : null
+    // Compare using SKU
+    const idx = user.cart.findIndex(i => {
+      const cartVariantSku = i.variant?.sku ?? null;
+      const reqVariantSku = variant ?? null;
+      return i.product.toString() === productId && cartVariantSku === reqVariantSku;
     });
+
+    // Resolve stock limit (Variant vs Base)
+    let stockLimit = product.stock;
+    if (variant) {
+      const vObj = product.variants.find(v => v.sku === variant);
+      if (vObj) stockLimit = vObj.stock;
+    }
+
+    if (idx >= 0) {
+      // increment qty safely
+      user.cart[idx].qty = Math.min(stockLimit, user.cart[idx].qty + Number(qty));
+    } else {
+      // add new item
+      user.cart.push({
+        product: productId,
+        qty: Math.min(stockLimit, Math.max(1, Number(qty))),
+        variant: variant ? { sku: variant } : null
+      });
+    }
+
+    await user.save();
+    await user.populate('cart.product');
+
+    res.json({ cart: user.cart });
+  } catch (error) {
+    console.error('Add to cart error:', error);
+    res.status(500).json({ message: 'Server error' });
   }
-
-  await user.save();
-  await user.populate('cart.product');
-
-  res.json({ cart: user.cart });
 };
 
 /* ================= UPDATE ITEM ================= */
 exports.updateItem = async (req, res) => {
-  const { productId, qty, variant = null } = req.body;
+  try {
+    const { productId, qty, variant = null } = req.body;
 
-  const user = await User.findById(req.user.id);
-  if (!user) return res.status(404).json({ message: 'User not found' });
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
 
-  // Find cart item by productId + variant SKU
-  const idx = user.cart.findIndex(i => {
-    const cartVariantSku = i.variant?.sku ?? null;
-    const reqVariantSku = variant ?? null;
-    return i.product.toString() === productId && cartVariantSku === reqVariantSku;
-  });
+    // Find cart item by productId + variant SKU
+    const idx = user.cart.findIndex(i => {
+      const cartVariantSku = i.variant?.sku ?? null;
+      const reqVariantSku = variant ?? null;
+      return i.product.toString() === productId && cartVariantSku === reqVariantSku;
+    });
 
-  if (idx === -1)
-    return res.status(404).json({ message: 'Item not found in cart' });
+    if (idx === -1)
+      return res.status(404).json({ message: 'Item not found in cart' });
 
-  const product = await Product.findById(productId);
-  if (!product) return res.status(404).json({ message: 'Product not found' });
+    const product = await Product.findById(productId);
+    if (!product) return res.status(404).json({ message: 'Product not found' });
 
-  user.cart[idx].qty = Math.min(Math.max(1, qty), product.stock);
+    // Resolve stock limit
+    let stockLimit = product.stock;
+    if (variant) {
+      const vObj = product.variants.find(v => v.sku === variant);
+      if (vObj) stockLimit = vObj.stock;
+    }
 
-  await user.save();
-  await user.populate('cart.product');
+    user.cart[idx].qty = Math.min(Math.max(1, qty), stockLimit);
 
-  res.json({ cart: user.cart });
+    await user.save();
+    await user.populate('cart.product');
+
+    res.json({ cart: user.cart });
+  } catch (error) {
+    console.error('Update cart item error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
 };
 
 /* ================= REMOVE ITEM ================= */
