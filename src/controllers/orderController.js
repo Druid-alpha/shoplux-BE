@@ -176,10 +176,13 @@ exports.getAllOrders = async (req, res) => {
 
 exports.updateOrderStatus = async (req, res) => {
   try {
-    const { status } = req.body
+    const { status, paymentStatus } = req.body
     const order = await Order.findById(req.params.id)
     if (!order) return res.status(404).json({ message: 'Order not found' })
-    order.status = status
+
+    if (status) order.status = status
+    if (paymentStatus) order.paymentStatus = paymentStatus
+
     await order.save()
     res.json({ order })
   } catch (error) {

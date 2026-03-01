@@ -92,13 +92,18 @@ exports.paystackWebHook = async (req, res) => {
     }
 
     // REDUCE STOCK
+    console.log(`[STOCK] Starting reduction for Order ${order._id}`)
     for (const item of order.items) {
       const product = await Product.findById(item.product).session(session)
       if (item.variant && item.variant.sku) {
         const idx = product.variants.findIndex(v => v.sku === item.variant.sku)
-        if (idx !== -1) product.variants[idx].stock -= item.qty
+        if (idx !== -1) {
+          product.variants[idx].stock -= item.qty
+          console.log(`[STOCK] Reduced Variant ${item.variant.sku} by ${item.qty}. New stock: ${product.variants[idx].stock}`)
+        }
       } else {
         product.stock -= item.qty
+        console.log(`[STOCK] Reduced Main Product ${product._id} by ${item.qty}. New stock: ${product.stock}`)
       }
       await product.save({ session })
     }
@@ -143,16 +148,18 @@ exports.paystackWebHook = async (req, res) => {
         stream.on('error', reject)
       })
 
+      console.log(`[INVOICE] Uploading to Cloudinary for Order ${order._id}`)
       const uploaded = await cloudinary.uploader.upload(tmpPath, {
         folder: 'invoices',
-        resource_type: 'auto',
+        resource_type: 'raw', // Better for PDFs
         public_id: `invoice-${order._id}`,
-        flags: 'attachment:false'
+        flags: 'attachment:true' // Force browser to treat as download
       })
 
       order.invoiceUrl = uploaded.secure_url
+      console.log(`[INVOICE] Success: ${order.invoiceUrl}`)
       await order.save({ session })
-      fs.unlink(tmpPath, () => { })
+      if (fs.existsSync(tmpPath)) fs.unlink(tmpPath, () => { })
     } catch (pdfErr) {
       console.error('Webhook PDF failed:', pdfErr.message)
     }

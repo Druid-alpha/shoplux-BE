@@ -307,34 +307,26 @@ exports.getFilterOptions = async (req, res) => {
 
     if (categoryId) {
       const category = await Category.findById(categoryId);
+      const isClothing = category?.name.toLowerCase() === 'clothing';
 
-      if (category?.name.toLowerCase() === 'clothing') {
-        // Clothing types
+      // ⚡ ROBUST BRAND FETCH: Get brands actually used by products in this category
+      const productFilter = { category: categoryId, isDeleted: false };
+      if (isClothing && clothingType && ['clothes', 'shoes', 'bag', 'eyeglass'].includes(clothingType)) {
+        productFilter.clothingType = clothingType;
+      }
+      const brandIds = await Product.distinct('brand', productFilter);
+      brands = await Brand.find({
+        _id: { $in: brandIds },
+        isActive: true,
+      }).select('_id name');
+
+      if (isClothing) {
         clothingTypes = ['clothes', 'shoes', 'bag', 'eyeglass'];
-
-        // Filter products to get valid brands
-        const productFilter = { category: categoryId, isDeleted: false };
-        if (clothingType && clothingTypes.includes(clothingType)) {
-          productFilter.clothingType = clothingType;
-        }
-
-        const brandIds = await Product.distinct('brand', productFilter);
-        brands = await Brand.find({
-          _id: { $in: brandIds },
-          isActive: true,
-        }).select('_id name');
-
         // Sizes by type
         if (clothingType === 'clothes') sizes = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
         else if (clothingType === 'shoes') sizes = ['38', '39', '40', '41', '42', '43', '44', '45'];
         else sizes = [];
       } else {
-        // Non-clothing categories → brands filtered by category OR global
-        brands = await Brand.find({
-          $or: [{ category: categoryId }, { category: null }],
-          isActive: true,
-        }).select('_id name');
-
         clothingTypes = [];
         sizes = [];
       }
