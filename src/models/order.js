@@ -12,8 +12,8 @@ const orderSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   items: [orderItemSchema],
   totalAmount: Number,
-  status: { type: String, enum: ['pending', 'paid', 'processing', 'shipped', 'delivered', 'failed'], default: 'pending' },
-  paymentStatus: { type: String, enum: ['pending', 'paid', 'failed'], default: 'pending' }, // <-- added
+  status: { type: String, enum: ['pending', 'paid', 'processing', 'shipped', 'delivered', 'failed', 'cancelled'], default: 'pending' },
+  paymentStatus: { type: String, enum: ['pending', 'paid', 'failed', 'refunded'], default: 'pending' }, // <-- added
   paymentRef: String,
   invoiceUrl: String
 }, { timestamps: true })
