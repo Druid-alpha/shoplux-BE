@@ -93,30 +93,7 @@ const buildQueryFromReq = async (req, { admin = false } = {}) => {
     req.query.clothingType && req.query.clothingType !== 'all'
       ? req.query.clothingType
       : null;
-  // Clothing Type filter
-  // Clothing Type filter (FIXED)
-  // ✅ STRICT clothingType filter (FINAL FIX)
-
-  // -----------------------
-  // CLOTHING TYPE (SAFE)
-  // -----------------------
-  // if (req.query.clothingType && req.query.clothingType !== 'all') {
-  //   let category = null
-
-  //   if (req.query.category) {
-  //     if (isValidObjectId(req.query.category)) {
-  //       category = await Category.findById(req.query.category).select('name')
-  //     } else {
-  //       category = await Category.findOne({
-  //         name: new RegExp(`^${req.query.category}$`, 'i')
-  //       }).select('name')
-  //     }
-  //   }
-
-  //   if (category?.name?.toLowerCase() === 'clothing') {
-  //     andConditions.push({ clothingType: req.query.clothingType })
-  //   }
-  // }
+ 
 
   // ✅ FINAL clothingType filter (ID OR NAME SAFE)
   if (
@@ -258,21 +235,6 @@ const updateSchema = createSchema.partial().extend({
   discount: z.coerce.number().min(0).optional(),
 })
 
-
-/* =====================================================
-   FILTER OPTIONS (MASTER DATA)
-===================================================== */
-
-// GET /api/products/filters?category=...&brand=...
-// backend/controllers/productController.js
-// backend/controllers/productController.js
-
-
-// GET /api/products/filters
-// GET /api/products/filters
-// GET /api/products/filters
-// GET /api/products/filters
-// GET /api/products/filters
 
 exports.getFilterOptions = async (req, res) => {
   try {
@@ -596,17 +558,7 @@ exports.createProduct = async (req, res) => {
         category: data.category,
         isActive: true,
       })
-      //  if (
-      //   data.variants?.some(v => v.options?.size) &&
-      //   !['clothes', 'shoes'].includes(data.clothingType)
-      // ) {
-      //   return res.status(400).json({
-      //     message: 'Sizes are only allowed for clothes or shoes'
-      //   })
-      // }
-
-
-
+     
       if (!validBrand) {
         return res.status(400).json({
           message: 'Selected brand does not belong to selected category',
@@ -652,9 +604,6 @@ exports.createProduct = async (req, res) => {
       }
     }
 
-    /* =======================
-       VARIANT IMAGES
-    ======================= */
 
     // =======================
     // VARIANT IMAGES
@@ -676,11 +625,6 @@ exports.createProduct = async (req, res) => {
     );
 
     data.variants = uploadedVariants;
-
-    // then save
-
-
-
 
     /* =======================
        CREATE PRODUCT

@@ -41,7 +41,7 @@ const variantSchema = new mongoose.Schema(
       default: null
     }
   },
-  { _id: false }
+  { _id: true }
 )
 
 /* ================= PRODUCT SCHEMA ================= */

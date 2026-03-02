@@ -92,28 +92,68 @@ exports.paystackWebHook = async (req, res) => {
     }
 
     // REDUCE STOCK
-    console.log(`[STOCK] Starting reduction for Order ${order._id}`)
-    for (const item of order.items) {
-      const product = await Product.findById(item.product).session(session)
-      if (item.variant && item.variant.sku) {
-        const idx = product.variants.findIndex(v => v.sku === item.variant.sku)
-        if (idx !== -1) {
-          product.variants[idx].stock -= item.qty
-          console.log(`[STOCK] Reduced Variant ${item.variant.sku} by ${item.qty}. New stock: ${product.variants[idx].stock}`)
-        }
-      } else {
-        product.stock -= item.qty
-        console.log(`[STOCK] Reduced Main Product ${product._id} by ${item.qty}. New stock: ${product.stock}`)
-      }
-      await product.save({ session })
-    }
+    /* ================= SAFE STOCK REDUCTION ================= */
+console.log(`[STOCK] Starting reduction for Order ${order._id}`)
+
+for (const item of order.items) {
+
+  const product = await Product.findById(item.product).session(session)
+
+  if (!product) continue
+
+  let variantUpdated = false
+
+/* ================= ATOMIC VARIANT STOCK ================= */
+if (item.variant?._id) {
+
+  const result = await Product.updateOne(
+    {
+      _id: product._id,
+      "variants._id": item.variant._id,
+      "variants.stock": { $gte: item.qty }
+    },
+    {
+      $inc: { "variants.$.stock": -item.qty }
+    },
+    { session }
+  )
+
+  if (result.modifiedCount === 0) {
+    throw new Error("Stock conflict (variant sold out)")
+  }
+
+  variantUpdated = true
+
+  console.log(`[ATOMIC] Variant reduced`)
+}
+
+/* ================= ATOMIC MAIN STOCK ================= */
+if (!variantUpdated) {
+
+  const result = await Product.updateOne(
+    {
+      _id: product._id,
+      stock: { $gte: item.qty }
+    },
+    {
+      $inc: { stock: -item.qty }
+    },
+    { session }
+  )
+
+  if (result.modifiedCount === 0) {
+    throw new Error("Stock conflict (product sold out)")
+  }
+
+  console.log(`[ATOMIC] Main stock reduced`)
+}
+}
 
     order.status = 'paid'
     order.paymentStatus = 'paid'
     await order.save({ session })
 
-    await User.findByIdAndUpdate(order.user, { cart: [] }, { session })
-
+  await User.findByIdAndUpdate(order.user._id, { cart: [] }, { session })
     // GENERATE PDF
     try {
       const invoiceName = `invoice-${order._id}.pdf`
@@ -133,7 +173,7 @@ exports.paystackWebHook = async (req, res) => {
 
       order.items.forEach((item, i) => {
         const variantInfo = item.variant?.sku ? ` [${item.variant.sku}]` : ''
-        doc.text(`${i + 1}. ${item.title || 'Product'}${variantInfo}`)
+       doc.text(`${i + 1}. ${item.product?.title || item.title || 'Product'}${variantInfo}`)
         doc.text(`   ${item.qty} x ₦${item.priceAtPurchase.toLocaleString()} = ₦${(item.priceAtPurchase * item.qty).toLocaleString()}`, { indent: 20 })
         doc.moveDown(0.5)
       })
@@ -156,7 +196,7 @@ exports.paystackWebHook = async (req, res) => {
         flags: 'attachment:true' // Force browser to treat as download
       })
 
-      order.invoiceUrl = uploaded.secure_url
+     order.invoiceUrl = uploaded.secure_url + '?fl_attachment=true'
       console.log(`[INVOICE] Success: ${order.invoiceUrl}`)
       await order.save({ session })
       if (fs.existsSync(tmpPath)) fs.unlink(tmpPath, () => { })
