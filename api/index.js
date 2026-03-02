@@ -56,6 +56,11 @@ async function connectDB() {
 /* ------------------------------------------------
    MIDDLEWARE
 ------------------------------------------------- */
+app.post(
+    '/api/payments/paystack/webhook',
+    express.raw({ type: 'application/json' }),
+    require('../src/controllers/paymentController').paystackWebHook
+)
 
 app.set('trust proxy', 1)
 app.use(express.json({ limit: '10mb' }))
@@ -85,11 +90,7 @@ app.use(rateLimit({
    ROUTES
 ------------------------------------------------- */
 
-app.post(
-    '/api/payments/paystack/webhook',
-    express.raw({ type: 'application/json' }),
-    require('../src/controllers/paymentController').paystackWebHook
-)
+
 
 app.use('/api/auth', require('../src/routes/authRoutes'))
 app.use('/api/users', require('../src/routes/userRoutes'))
