@@ -1,10 +1,10 @@
 const Order = require('../models/order')
 const User = require('../models/user')
 const Product = require('../models/product')
-const PDFDocument = require('pdfkit')
-const fs = require('fs')
-const path = require('path')
-const cloudinary = require('../config/cloudinary')
+// const PDFDocument = require('pdfkit')
+// const fs = require('fs')
+// const path = require('path')
+// const cloudinary = require('../config/cloudinary')
 
 
 exports.createOrder = async (req, res) => {
@@ -26,7 +26,7 @@ exports.createOrder = async (req, res) => {
 
       if (cartItem.variant && cartItem.variant.sku) {
         const variant = product.variants.find(
-          v => v.sku === cartItem.variant.sku
+          v => String(v._id) === String(cartItem.variant._id)
         )
 
         if (!variant) throw new Error('Variant not found')
@@ -68,60 +68,15 @@ exports.createOrder = async (req, res) => {
       status: 'pending'
     })
 
-    user.cart = []
-    await user.save()
+   
 
     // ------------------ GENERATE PDF ------------------
-    try {
-      const invoiceName = `invoice-${order._id}.pdf`
-      const tmpPath = path.join('/tmp', invoiceName)
 
-      const doc = new PDFDocument({ margin: 50 })
-      const stream = fs.createWriteStream(tmpPath)
-      doc.pipe(stream)
+    res.status(201).json({
+      order,
+      message: "Order created. Proceed to payment."
+    })
 
-      doc.fontSize(25).text('OFFICIAL INVOICE', { align: 'center' })
-      doc.moveDown()
-      doc.fontSize(12).text(`Order ID: ${order._id}`)
-      doc.text(`Date: ${new Date().toLocaleDateString('en-US', { dateStyle: 'full' })}`)
-      doc.text(`Customer: ${user.name} (${user.email})`)
-      doc.moveDown()
-      doc.text('-------------------------------------------------------------------------------')
-
-      orderItems.forEach((item, i) => {
-        const variantInfo = item.variant?.sku ? ` [${item.variant.sku}]` : ''
-        doc.text(`${i + 1}. ${item.title}${variantInfo}`)
-        doc.text(`   ${item.qty} x ₦${item.priceAtPurchase.toLocaleString()} = ₦${(item.priceAtPurchase * item.qty).toLocaleString()}`, { indent: 20 })
-        doc.moveDown(0.5)
-      })
-
-      doc.text('-------------------------------------------------------------------------------')
-      doc.moveDown()
-      doc.fontSize(16).text(`TOTAL AMOUNT: ₦${total.toLocaleString()}`, { align: 'right' })
-      doc.end()
-
-      // CRITICAL: wait for stream close before upload
-      await new Promise((resolve, reject) => {
-        stream.on('finish', resolve)
-        stream.on('error', reject)
-      })
-
-      const uploaded = await cloudinary.uploader.upload(tmpPath, {
-        folder: 'invoices',
-        resource_type: 'auto', // Use auto for better PDF handling
-        public_id: `invoice-${order._id}`,
-        flags: 'attachment:false' // Ensure it previews in browser
-      })
-
-      order.invoiceUrl = uploaded.secure_url
-      await order.save()
-
-      fs.unlink(tmpPath, () => { })
-    } catch (pdfErr) {
-      console.error('Invoice generation failed:', pdfErr.message)
-    }
-
-    res.status(201).json({ order, invoiceUrl: order.invoiceUrl, userEmail: user.email })
   } catch (error) {
     console.error(error)
     res.status(500).json({ message: error.message })
@@ -182,7 +137,34 @@ exports.updateOrderStatus = async (req, res) => {
 
     if (status) order.status = status
     if (paymentStatus) order.paymentStatus = paymentStatus
+    /* ================= ADMIN MANUAL PAYMENT STOCK FIX ================= */
+    if (paymentStatus === 'paid' && order.paymentStatus !== 'paid') {
 
+      for (const item of order.items) {
+
+        const product = await Product.findById(item.product)
+        if (!product) continue
+
+        if (item.variant?._id) {
+          await Product.updateOne(
+            { _id: product._id, "variants._id": item.variant._id },
+            { $inc: { "variants.$.stock": -item.qty } }
+          )
+        } else {
+          await Product.updateOne(
+            {
+              _id: product._id,
+              stock: { $gte: item.qty }
+            },
+            {
+              $inc: { stock: -item.qty }
+            }
+          )
+        }
+      }
+
+      order.status = 'paid'
+    }
     await order.save()
     res.json({ order })
   } catch (error) {

@@ -86,7 +86,7 @@ exports.paystackWebHook = async (req, res) => {
 
   try {
     const order = await Order.findOne({ paymentRef: reference }).populate('user').session(session)
-    if (!order || order.status === 'paid') {
+   if (!order || order.paymentStatus === 'paid') {
       await session.abortTransaction()
       return res.sendStatus(200)
     }
@@ -98,57 +98,62 @@ console.log(`[STOCK] Starting reduction for Order ${order._id}`)
 for (const item of order.items) {
 
   const product = await Product.findById(item.product).session(session)
-
   if (!product) continue
 
   let variantUpdated = false
 
-/* ================= ATOMIC VARIANT STOCK ================= */
-if (item.variant?._id) {
+  /* VARIANT ATOMIC REDUCTION */
+  if (item.variant?._id) {
 
-  const result = await Product.updateOne(
-    {
-      _id: product._id,
-      "variants._id": item.variant._id,
-      "variants.stock": { $gte: item.qty }
-    },
-    {
-      $inc: { "variants.$.stock": -item.qty }
-    },
-    { session }
-  )
+    const result = await Product.updateOne(
+      {
+        _id: product._id,
+        "variants._id": item.variant._id,
+        "variants.stock": { $gte: item.qty }
+      },
+      {
+        $inc: { "variants.$.stock": -item.qty }
+      },
+      { session }
+    )
 
-  if (result.modifiedCount === 0) {
-    throw new Error("Stock conflict (variant sold out)")
+    if (result.modifiedCount === 0) {
+      throw new Error("Stock conflict (variant sold out)")
+    }
+
+    variantUpdated = true
   }
 
-  variantUpdated = true
+  /* MAIN STOCK REDUCTION */
+  if (!variantUpdated) {
 
-  console.log(`[ATOMIC] Variant reduced`)
-}
+    const result = await Product.updateOne(
+      {
+        _id: product._id,
+        stock: { $gte: item.qty }
+      },
+      {
+        $inc: { stock: -item.qty }
+      },
+      { session }
+    )
 
-/* ================= ATOMIC MAIN STOCK ================= */
-if (!variantUpdated) {
-
-  const result = await Product.updateOne(
-    {
-      _id: product._id,
-      stock: { $gte: item.qty }
-    },
-    {
-      $inc: { stock: -item.qty }
-    },
-    { session }
-  )
-
-  if (result.modifiedCount === 0) {
-    throw new Error("Stock conflict (product sold out)")
+    if (result.modifiedCount === 0) {
+      throw new Error("Stock conflict (product sold out)")
+    }
   }
 
-  console.log(`[ATOMIC] Main stock reduced`)
-}
-}
+  /* ================= FIX: RESYNC TOTAL STOCK ================= */
+  const updatedProduct = await Product.findById(product._id).session(session)
 
+  if (updatedProduct?.variants?.length) {
+    updatedProduct.stock = updatedProduct.variants.reduce(
+      (sum, v) => sum + (v.stock || 0),
+      0
+    )
+    await updatedProduct.save({ session })
+  }
+}
     order.status = 'paid'
     order.paymentStatus = 'paid'
     await order.save({ session })
@@ -195,7 +200,7 @@ if (!variantUpdated) {
   public_id: `invoice-${order._id}`
 })
 
-order.invoiceUrl = uploaded.secure_url + '?fl_attachment'
+order.invoiceUrl = uploaded.secure_url + '?fl_attachment=true'
       console.log(`[INVOICE] Success: ${order.invoiceUrl}`)
       await order.save({ session })
       if (fs.existsSync(tmpPath)) fs.unlink(tmpPath, () => { })
