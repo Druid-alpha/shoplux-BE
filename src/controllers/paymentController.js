@@ -173,7 +173,7 @@ if (!variantUpdated) {
 
       order.items.forEach((item, i) => {
         const variantInfo = item.variant?.sku ? ` [${item.variant.sku}]` : ''
-       doc.text(`${i + 1}. ${item.product?.title || item.title || 'Product'}${variantInfo}`)
+       doc.text(`${i + 1}. ${item.title || 'Product'}${variantInfo}`)
         doc.text(`   ${item.qty} x ₦${item.priceAtPurchase.toLocaleString()} = ₦${(item.priceAtPurchase * item.qty).toLocaleString()}`, { indent: 20 })
         doc.moveDown(0.5)
       })
@@ -189,14 +189,13 @@ if (!variantUpdated) {
       })
 
       console.log(`[INVOICE] Uploading to Cloudinary for Order ${order._id}`)
-      const uploaded = await cloudinary.uploader.upload(tmpPath, {
-        folder: 'invoices',
-        resource_type: 'raw', // Better for PDFs
-        public_id: `invoice-${order._id}`,
-        flags: 'attachment:true' // Force browser to treat as download
-      })
+          const uploaded = await cloudinary.uploader.upload(tmpPath, {
+  folder: 'invoices',
+  resource_type: 'raw',
+  public_id: `invoice-${order._id}`
+})
 
-     order.invoiceUrl = uploaded.secure_url + '?fl_attachment=true'
+order.invoiceUrl = uploaded.secure_url + '?fl_attachment'
       console.log(`[INVOICE] Success: ${order.invoiceUrl}`)
       await order.save({ session })
       if (fs.existsSync(tmpPath)) fs.unlink(tmpPath, () => { })
