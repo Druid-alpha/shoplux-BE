@@ -16,7 +16,7 @@ exports.addToCart = async (req, res) => {
 
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ message: 'User not found' });
-
+if (!user.cart) user.cart = [] 
     const product = await Product.findById(productId);
     if (!product) return res.status(404).json({ message: 'Product not found' });
 
@@ -136,3 +136,64 @@ exports.clearCart = async (req, res) => {
   await user.save();
   res.json({ cart: [] });
 };
+/* ================= SYNC GUEST CART ================= */
+exports.syncCart = async (req, res) => {
+  try {
+    const { items = [] } = req.body
+
+    const user = await User.findById(req.user.id)
+    if (!user) return res.status(404).json({ message: 'User not found' })
+
+    if (!user.cart) user.cart = []
+
+    for (const item of items) {
+
+      const productId = item.product || item.productId
+      const qty = Number(item.qty) || 1
+      const variant = item.variant?.sku || item.variant || null
+
+      const product = await Product.findById(productId)
+      if (!product) continue
+
+      // Check existing item
+      const idx = user.cart.findIndex(i => {
+        const cartProdId = String(i.product)
+        const reqProdId = String(productId)
+
+        const cartVariantSku = String(i.variant?.sku || "")
+        const reqVariantSku = String(variant || "")
+
+        return cartProdId === reqProdId && cartVariantSku === reqVariantSku
+      })
+
+      // Resolve stock
+      let stockLimit = product.stock
+      if (variant) {
+        const vObj = product.variants.find(v => v.sku === String(variant))
+        if (vObj) stockLimit = vObj.stock
+      }
+
+      if (idx >= 0) {
+        user.cart[idx].qty = Math.min(
+          stockLimit,
+          user.cart[idx].qty + qty
+        )
+      } else {
+        user.cart.push({
+          product: productId,
+          qty: Math.min(stockLimit, Math.max(1, qty)),
+          variant: variant ? { sku: String(variant) } : {}
+        })
+      }
+    }
+
+    await user.save()
+    await user.populate('cart.product')
+
+    res.json({ cart: user.cart })
+
+  } catch (error) {
+    console.error('Sync cart error:', error)
+    res.status(500).json({ message: 'Cart sync failed' })
+  }
+}

@@ -85,7 +85,10 @@ exports.paystackWebHook = async (req, res) => {
   session.startTransaction()
 
   try {
-    const order = await Order.findOne({ paymentRef: reference }).populate('user').session(session)
+   const order = await Order.findOne({
+  paymentRef: reference,
+  paymentStatus: { $ne: 'paid' } // prevent double processing
+}).populate('user').session(session)
    if (!order || order.paymentStatus === 'paid') {
       await session.abortTransaction()
       return res.sendStatus(200)
@@ -158,7 +161,11 @@ for (const item of order.items) {
     order.paymentStatus = 'paid'
     await order.save({ session })
 
-  await User.findByIdAndUpdate(order.user._id, { cart: [] }, { session })
+  await User.updateOne(
+  { _id: order.user._id },
+  { $set: { cart: [] } },
+  { session }
+)
     // GENERATE PDF
     try {
       const invoiceName = `invoice-${order._id}.pdf`
