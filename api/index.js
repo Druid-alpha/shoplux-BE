@@ -8,7 +8,7 @@ const cookieParser = require('cookie-parser')
 const morgan = require('morgan')
 
 const bcrypt = require('bcryptjs')
-const User = require('../src/models/user')
+const User = require('../models/user')
 
 const app = express()
 

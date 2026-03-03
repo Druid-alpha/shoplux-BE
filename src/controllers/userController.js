@@ -1,4 +1,4 @@
-const User = require('../models/user')
+const User = require('../../models/user')
 const { z } = require('zod')
 const { uploadToCloudinary } = require('../middleware/uploadMiddleware')
 

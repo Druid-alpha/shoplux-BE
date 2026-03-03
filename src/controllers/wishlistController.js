@@ -1,4 +1,4 @@
-const Wishlist = require('../models/wishlist')
+const Wishlist = require('../../models/wishlist')
 const mongoose = require('mongoose')
 
 exports.getWishList = async (req, res) => {

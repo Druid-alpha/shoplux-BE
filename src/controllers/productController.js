@@ -2,10 +2,10 @@ const mongoose = require('mongoose')
 const { z } = require('zod')
 const cloudinary = require('../config/cloudinary') // adjust the path
 
-const Product = require('../models/product')
-const Brand = require('../models/Brand')
-const Category = require('../models/Category')
-const Color = require('../models/Color')
+const Product = require('../../models/product')
+const Brand = require('../../models/Brand')
+const Category = require('../../models/Category')
+const Color = require('../../models/Color')
 const { uploadToCloudinary } = require('../middleware/uploadMiddleware')
 
 /* =====================================================
