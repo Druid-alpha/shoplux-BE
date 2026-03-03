@@ -63,8 +63,18 @@ exports.register = async (req, res) => {
         // Send OTP email
         await sendEmail({
             to: user.email,
-            subject: 'Verify your email',
-            html: `<p>Your verification code: <b>${otp}</b></p>`,
+            subject: 'Verify your ShopLuxe account',
+            title: 'Email Verification',
+            preheader: 'Your verification code is inside.',
+            htmlContent: `
+              <h1>Verify your email address</h1>
+              <p>Hello ${user.name.split(' ')[0]},</p>
+              <p>Welcome to ShopLuxe! We're thrilled to have you. To complete your registration, please enter the verification code below:</p>
+              <div class="otp-box">
+                <p class="otp-code">${otp}</p>
+              </div>
+              <p>This code will expire in 10 minutes. If you didn't create an account, you can safely ignore this email.</p>
+            `,
         })
 
         res
@@ -119,8 +129,18 @@ exports.resendOtp = async (req, res) => {
 
         await sendEmail({
             to: user.email,
-            subject: 'Verify your email',
-            html: `<p>Your new OTP is <b>${otp}</b></p>`
+            subject: 'Your new verification code',
+            title: 'New OTP Code',
+            preheader: 'Here is your new verification code.',
+            htmlContent: `
+              <h1>New Verification Code</h1>
+              <p>Hello ${user.name.split(' ')[0]},</p>
+              <p>You requested a new verification code. Please use the code below to verify your email address:</p>
+              <div class="otp-box">
+                <p class="otp-code">${otp}</p>
+              </div>
+              <p>This code will expire in 10 minutes.</p>
+            `
         })
 
         res.json({ message: 'OTP resent successfully' })
@@ -172,13 +192,17 @@ exports.verifyOtp = async (req, res) => {
         await sendEmail({
             to: user.email,
             subject: 'Welcome to ShopLuxe 🎉',
-            html: `
-    <h2>Welcome, ${user.name} 👋</h2>
-    <p>Your email has been successfully verified.</p>
-    <p>You can now log in and start shopping amazing products.</p>
-    <br />
-    <p><b>Happy shopping 🛒</b></p>
-  `
+            title: 'Welcome to ShopLuxe',
+            preheader: 'Your account is fully verified.',
+            htmlContent: `
+                <h1>Welcome, ${user.name.split(' ')[0]}! 👋</h1>
+                <p>Your email has been successfully verified, and your ShopLuxe account is now fully active.</p>
+                <p>We curate the finest premium products for an unmatched shopping experience. You can now log in and start browsing our collections.</p>
+                <div style="text-align: center; margin: 30px 0;">
+                  <a href="${process.env.CLIENT_URL || 'http://localhost:5173'}/products" class="button">Start Shopping</a>
+                </div>
+                <p>If you have any questions or need assistance, our support team is always here to help.</p>
+            `
         })
         res.json({ message: 'Email verified successfully' })
     } catch (error) {
@@ -334,9 +358,20 @@ exports.forgotPassword = async (req, res) => {
 
         await sendEmail({
             to: user.email,
-            subject: 'Reset password',
-            html: `<p>Reset your password here:</p>
-             <a href="${resetLink}">${resetLink}</a>`
+            subject: 'Reset your password - ShopLuxe',
+            title: 'Password Reset',
+            preheader: 'Link to reset your password is inside.',
+            htmlContent: `
+              <h1>Reset Your Password</h1>
+              <p>Hello ${user.name.split(' ')[0]},</p>
+              <p>We received a request to reset the password for your ShopLuxe account.</p>
+              <div style="text-align: center; margin: 30px 0;">
+                <a href="${resetLink}" class="button">Reset Password</a>
+              </div>
+              <p>If the button doesn't work, copy and paste this link into your browser:</p>
+              <p style="word-break: break-all; color: #0066cc; font-size: 14px;">${resetLink}</p>
+              <p style="margin-top: 30px; font-size: 14px; color: #666;">This link will expire in 30 minutes. If you did not request a password reset, you can safely ignore this email.</p>
+            `
         })
 
         res.json({ message: 'Password reset email sent' })

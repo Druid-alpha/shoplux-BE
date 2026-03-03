@@ -1,4 +1,4 @@
-const router= require('express').Router()
+const router = require('express').Router()
 const auth = require('../middleware/authCookie')
 const orderCtrl = require('../controllers/orderController')
 
@@ -7,6 +7,7 @@ router.get('/my', orderCtrl.getMyOrder)
 router.get('/:id', orderCtrl.getOrderId)
 router.get('/', orderCtrl.getAllOrders)
 router.post('/', orderCtrl.createOrder)
-router.patch('/:id/status',orderCtrl.updateOrderStatus)
+router.patch('/:id/status', orderCtrl.updateOrderStatus)
+router.delete('/:id', orderCtrl.deleteOrder)
 
-module.exports=router
+module.exports = router

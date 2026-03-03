@@ -171,3 +171,24 @@ exports.updateOrderStatus = async (req, res) => {
     res.status(500).json({ message: 'Server error' })
   }
 }
+
+exports.deleteOrder = async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id)
+    if (!order) return res.status(404).json({ message: 'Order not found' })
+
+    const isAdmin = req.user.role === 'admin'
+
+    // Only admins can delete orders to prevent accidental customer deletes
+    if (!isAdmin) {
+      return res.status(403).json({ message: 'Access denied: Admins only' })
+    }
+
+    await Order.findByIdAndDelete(req.params.id)
+    res.json({ message: 'Order successfully deleted' })
+
+  } catch (error) {
+    console.error('Delete order error:', error)
+    res.status(500).json({ message: 'Server error deleting order' })
+  }
+}
