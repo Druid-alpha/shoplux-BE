@@ -11,6 +11,9 @@ const cloudinary = require('../config/cloudinary')
 const sendEmail = require('../utils/sendEmail')
 
 
+/* ================================================================
+   INIT — Create Paystack transaction for a pending order
+================================================================ */
 exports.initPaystackTransaction = async (req, res) => {
   try {
     const { orderId } = req.body
@@ -20,7 +23,7 @@ exports.initPaystackTransaction = async (req, res) => {
       return res.status(400).json({ message: "Order ID is required" })
     }
 
-    const order = await Order.findById(orderId).populate("user", "email")
+    const order = await Order.findById(orderId).populate("user", "email name")
 
     if (!order) {
       return res.status(404).json({ message: "Order not found" })
@@ -41,7 +44,10 @@ exports.initPaystackTransaction = async (req, res) => {
       amount: Math.round(order.totalAmount * 100),
       reference,
       callback_url: `${process.env.CLIENT_URL}/payment/success`,
-      metadata: { orderId: order._id.toString() }
+      metadata: {
+        orderId: order._id.toString(),
+        customerName: order.shippingAddress?.fullName || order.user.name
+      }
     })
 
     order.paymentRef = reference
@@ -58,6 +64,123 @@ exports.initPaystackTransaction = async (req, res) => {
   }
 }
 
+
+/* ================================================================
+   VERIFY — Called after Paystack redirect to confirm payment
+   Fallback to webhook if webhook was missed (e.g. dev environment)
+================================================================ */
+exports.verifyPaystackPayment = async (req, res) => {
+  const { reference } = req.params
+  const userId = req.user.id
+
+  if (!reference) {
+    return res.status(400).json({ message: 'Payment reference is required' })
+  }
+
+  try {
+    // 1. Verify with Paystack API
+    const response = await paystack.get(`/transaction/verify/${reference}`)
+    const paystackData = response.data.data
+
+    if (!paystackData || paystackData.status !== 'success') {
+      return res.status(400).json({ message: 'Payment not successful on Paystack' })
+    }
+
+    // 2. Find the order by paymentRef
+    const order = await Order.findOne({ paymentRef: reference }).populate('user', 'email name')
+
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found for this payment reference' })
+    }
+
+    // Security: ensure the order belongs to this user
+    if (String(order.user._id) !== String(userId)) {
+      return res.status(403).json({ message: 'Unauthorized' })
+    }
+
+    // 3. If already paid (webhook already ran), just return the order
+    if (order.paymentStatus === 'paid') {
+      return res.status(200).json({ order, message: 'Payment already verified' })
+    }
+
+    // 4. Idempotent: reduce stock and mark as paid (fallback from webhook)
+    const session = await mongoose.startSession()
+    session.startTransaction()
+
+    try {
+      for (const item of order.items) {
+        const product = await Product.findById(item.product).session(session)
+        if (!product) continue
+
+        let variantUpdated = false
+
+        if (item.variant?._id) {
+          const result = await Product.updateOne(
+            {
+              _id: product._id,
+              "variants._id": item.variant._id,
+              "variants.stock": { $gte: item.qty }
+            },
+            { $inc: { "variants.$.stock": -item.qty } },
+            { session }
+          )
+          if (result.modifiedCount > 0) variantUpdated = true
+        }
+
+        if (!variantUpdated) {
+          await Product.updateOne(
+            { _id: product._id, stock: { $gte: item.qty } },
+            { $inc: { stock: -item.qty } },
+            { session }
+          )
+        }
+
+        // Resync total stock
+        const updated = await Product.findById(product._id).session(session)
+        if (updated?.variants?.length) {
+          updated.stock = updated.variants.reduce((s, v) => s + (v.stock || 0), 0)
+          await updated.save({ session })
+        }
+      }
+
+      order.status = 'paid'
+      order.paymentStatus = 'paid'
+      await order.save({ session })
+
+      await User.updateOne(
+        { _id: order.user._id },
+        { $set: { cart: [] } },
+        { session }
+      )
+
+      await session.commitTransaction()
+      session.endSession()
+
+    } catch (stockErr) {
+      await session.abortTransaction()
+      session.endSession()
+      console.error('[VERIFY] Stock reduction failed:', stockErr.message)
+      // Still mark as paid even if stock update fails
+      order.status = 'paid'
+      order.paymentStatus = 'paid'
+      await order.save()
+    }
+
+    // 5. Generate invoice PDF (best-effort, don't block response)
+    generateInvoice(order).catch(err => console.error('[VERIFY PDF]', err.message))
+
+    return res.status(200).json({ order, message: 'Payment verified successfully' })
+
+  } catch (error) {
+    console.error("Verify error:", error.response?.data || error.message)
+    res.status(500).json({ message: 'Payment verification failed' })
+  }
+}
+
+
+/* ================================================================
+   WEBHOOK — Paystack event handler
+================================================================ */
 exports.paystackWebHook = async (req, res) => {
   const hash = crypto
     .createHmac('sha512', process.env.PAYSTACK_SECRET_KEY)
@@ -69,167 +192,196 @@ exports.paystackWebHook = async (req, res) => {
   const event = JSON.parse(req.body.toString())
 
   if (event.event === 'charge.failed') {
-    const order = await Order.findOne({ paymentRef: event.data.reference });
+    const order = await Order.findOne({ paymentRef: event.data.reference })
     if (order) {
-      order.paymentStatus = 'failed';
-      order.status = 'failed';
-      await order.save();
+      order.paymentStatus = 'failed'
+      order.status = 'failed'
+      await order.save()
     }
-    return res.sendStatus(200);
+    return res.sendStatus(200)
   }
 
-  if (event.event !== 'charge.success') return res.sendStatus(200);
+  if (event.event !== 'charge.success') return res.sendStatus(200)
 
   const reference = event.data.reference
   const session = await mongoose.startSession()
   session.startTransaction()
 
   try {
-   const order = await Order.findOne({
-  paymentRef: reference,
-  paymentStatus: { $ne: 'paid' } // prevent double processing
-}).populate('user').session(session)
-   if (!order || order.paymentStatus === 'paid') {
+    const order = await Order.findOne({
+      paymentRef: reference,
+      paymentStatus: { $ne: 'paid' }
+    }).populate('user').session(session)
+
+    if (!order || order.paymentStatus === 'paid') {
       await session.abortTransaction()
       return res.sendStatus(200)
     }
 
     // REDUCE STOCK
-    /* ================= SAFE STOCK REDUCTION ================= */
-console.log(`[STOCK] Starting reduction for Order ${order._id}`)
+    for (const item of order.items) {
+      const product = await Product.findById(item.product).session(session)
+      if (!product) continue
 
-for (const item of order.items) {
+      let variantUpdated = false
 
-  const product = await Product.findById(item.product).session(session)
-  if (!product) continue
+      if (item.variant?._id) {
+        const result = await Product.updateOne(
+          {
+            _id: product._id,
+            "variants._id": item.variant._id,
+            "variants.stock": { $gte: item.qty }
+          },
+          { $inc: { "variants.$.stock": -item.qty } },
+          { session }
+        )
+        if (result.modifiedCount === 0) throw new Error("Stock conflict (variant sold out)")
+        variantUpdated = true
+      }
 
-  let variantUpdated = false
+      if (!variantUpdated) {
+        const result = await Product.updateOne(
+          { _id: product._id, stock: { $gte: item.qty } },
+          { $inc: { stock: -item.qty } },
+          { session }
+        )
+        if (result.modifiedCount === 0) throw new Error("Stock conflict (product sold out)")
+      }
 
-  /* VARIANT ATOMIC REDUCTION */
-  if (item.variant?._id) {
-
-    const result = await Product.updateOne(
-      {
-        _id: product._id,
-        "variants._id": item.variant._id,
-        "variants.stock": { $gte: item.qty }
-      },
-      {
-        $inc: { "variants.$.stock": -item.qty }
-      },
-      { session }
-    )
-
-    if (result.modifiedCount === 0) {
-      throw new Error("Stock conflict (variant sold out)")
+      const updatedProduct = await Product.findById(product._id).session(session)
+      if (updatedProduct?.variants?.length) {
+        updatedProduct.stock = updatedProduct.variants.reduce((sum, v) => sum + (v.stock || 0), 0)
+        await updatedProduct.save({ session })
+      }
     }
 
-    variantUpdated = true
-  }
-
-  /* MAIN STOCK REDUCTION */
-  if (!variantUpdated) {
-
-    const result = await Product.updateOne(
-      {
-        _id: product._id,
-        stock: { $gte: item.qty }
-      },
-      {
-        $inc: { stock: -item.qty }
-      },
-      { session }
-    )
-
-    if (result.modifiedCount === 0) {
-      throw new Error("Stock conflict (product sold out)")
-    }
-  }
-
-  /* ================= FIX: RESYNC TOTAL STOCK ================= */
-  const updatedProduct = await Product.findById(product._id).session(session)
-
-  if (updatedProduct?.variants?.length) {
-    updatedProduct.stock = updatedProduct.variants.reduce(
-      (sum, v) => sum + (v.stock || 0),
-      0
-    )
-    await updatedProduct.save({ session })
-  }
-}
     order.status = 'paid'
     order.paymentStatus = 'paid'
     await order.save({ session })
 
-  await User.updateOne(
-  { _id: order.user._id },
-  { $set: { cart: [] } },
-  { session }
-)
-    // GENERATE PDF
-    try {
-      const invoiceName = `invoice-${order._id}.pdf`
-      const tmpPath = path.join('/tmp', invoiceName)
-
-      const doc = new PDFDocument({ margin: 50 })
-      const stream = fs.createWriteStream(tmpPath)
-      doc.pipe(stream)
-
-      doc.fontSize(25).text('OFFICIAL INVOICE', { align: 'center' })
-      doc.moveDown()
-      doc.fontSize(12).text(`Order ID: ${order._id}`)
-      doc.text(`Date: ${new Date().toLocaleDateString('en-US', { dateStyle: 'full' })}`)
-      doc.text(`Customer: ${order.user.name || 'Valued Customer'}`)
-      doc.moveDown()
-      doc.text('-------------------------------------------------------------------------------')
-
-      order.items.forEach((item, i) => {
-        const variantInfo = item.variant?.sku ? ` [${item.variant.sku}]` : ''
-       doc.text(`${i + 1}. ${item.title || 'Product'}${variantInfo}`)
-        doc.text(`   ${item.qty} x ₦${item.priceAtPurchase.toLocaleString()} = ₦${(item.priceAtPurchase * item.qty).toLocaleString()}`, { indent: 20 })
-        doc.moveDown(0.5)
-      })
-
-      doc.text('-------------------------------------------------------------------------------')
-      doc.moveDown()
-      doc.fontSize(16).text(`TOTAL PAID: ₦${order.totalAmount.toLocaleString()}`, { align: 'right' })
-      doc.end()
-
-      await new Promise((resolve, reject) => {
-        stream.on('finish', resolve)
-        stream.on('error', reject)
-      })
-
-      console.log(`[INVOICE] Uploading to Cloudinary for Order ${order._id}`)
-          const uploaded = await cloudinary.uploader.upload(tmpPath, {
-  folder: 'invoices',
-  resource_type: 'raw',
-  public_id: `invoice-${order._id}`
-})
-
-order.invoiceUrl = uploaded.secure_url + '?fl_attachment=true'
-      console.log(`[INVOICE] Success: ${order.invoiceUrl}`)
-      await order.save({ session })
-      if (fs.existsSync(tmpPath)) fs.unlink(tmpPath, () => { })
-    } catch (pdfErr) {
-      console.error('Webhook PDF failed:', pdfErr.message)
-    }
+    await User.updateOne(
+      { _id: order.user._id },
+      { $set: { cart: [] } },
+      { session }
+    )
 
     await session.commitTransaction()
     session.endSession()
+
+    // Generate invoice async after transaction
+    generateInvoice(order).catch(err => console.error('Webhook PDF failed:', err.message))
 
     try {
       await sendEmail(
         order.user.email,
         "Payment Successful - ShopLuxe",
-        `Your payment for order ${order._id} was successful. Thank you for shopping with ShopLuxe!`
-      );
+        `Your payment for order #${order._id} was successful. Thank you for shopping with ShopLuxe!\n\nShipping to: ${order.shippingAddress?.fullName || 'N/A'}, ${order.shippingAddress?.address || ''}, ${order.shippingAddress?.city || ''}, ${order.shippingAddress?.state || ''}.`
+      )
     } catch (e) { console.error('Email failed:', e.message) }
 
     res.sendStatus(200)
+
   } catch (error) {
     await session.abortTransaction()
     session.endSession()
+    console.error('[WEBHOOK ERROR]', error.message)
     res.sendStatus(500)
   }
+}
+
+
+/* ================================================================
+   HELPER — Generate & Upload PDF Invoice to Cloudinary
+================================================================ */
+async function generateInvoice(order) {
+  const invoiceName = `invoice-${order._id}.pdf`
+  const tmpPath = path.join('/tmp', invoiceName)
+
+  const doc = new PDFDocument({ margin: 50 })
+  const stream = fs.createWriteStream(tmpPath)
+  doc.pipe(stream)
+
+  // Header
+  doc.fontSize(22).font('Helvetica-Bold').text('SHOPLUXE', { align: 'center' })
+  doc.fontSize(10).font('Helvetica').text('Zone 7, Ota-Efun Osogbo, Osun, Nigeria', { align: 'center' })
+  doc.text('support@shopluxe.com', { align: 'center' })
+  doc.moveDown(1.5)
+
+  doc.fontSize(18).font('Helvetica-Bold').text('OFFICIAL INVOICE', { align: 'center' })
+  doc.moveDown()
+
+  // Order meta
+  doc.fontSize(11).font('Helvetica')
+  doc.text(`Invoice No: ${order._id}`)
+  doc.text(`Date: ${new Date(order.createdAt || Date.now()).toLocaleDateString('en-US', { dateStyle: 'full' })}`)
+  doc.text(`Payment Status: ${order.paymentStatus?.toUpperCase() || 'PAID'}`)
+  doc.moveDown()
+
+  // Shipping address
+  const addr = order.shippingAddress
+  if (addr?.fullName) {
+    doc.font('Helvetica-Bold').text('Billed To:')
+    doc.font('Helvetica')
+    doc.text(addr.fullName)
+    if (addr.phone) doc.text(`Phone: ${addr.phone}`)
+    if (addr.address) doc.text(addr.address)
+    if (addr.city || addr.state) doc.text(`${addr.city || ''}${addr.city && addr.state ? ', ' : ''}${addr.state || ''}`)
+    doc.text('Nigeria')
+    doc.moveDown()
+  }
+
+  // Items table header
+  doc.font('Helvetica-Bold')
+  doc.text('ITEMS', { underline: true })
+  doc.moveDown(0.5)
+  doc.font('Helvetica')
+  doc.text('------------------------------------------------------------------')
+
+  order.items.forEach((item, i) => {
+    const variantInfo = item.variant?.sku ? ` [${item.variant.sku}]` : ''
+    const itemName = item.title || 'Product'
+    const lineTotal = (item.priceAtPurchase || 0) * item.qty
+    doc.font('Helvetica-Bold').text(`${i + 1}. ${itemName}${variantInfo}`)
+    doc.font('Helvetica').text(
+      `   Qty: ${item.qty}  x  ₦${(item.priceAtPurchase || 0).toLocaleString()}  =  ₦${lineTotal.toLocaleString()}`,
+      { indent: 10 }
+    )
+    doc.moveDown(0.3)
+  })
+
+  doc.text('------------------------------------------------------------------')
+  doc.moveDown()
+
+  // Total
+  doc.fontSize(14).font('Helvetica-Bold').text(
+    `TOTAL PAID: ₦${(order.totalAmount || 0).toLocaleString()}`,
+    { align: 'right' }
+  )
+
+  doc.moveDown(2)
+  doc.fontSize(9).font('Helvetica').text(
+    'Thank you for shopping with ShopLuxe. We appreciate your business!',
+    { align: 'center' }
+  )
+
+  doc.end()
+
+  await new Promise((resolve, reject) => {
+    stream.on('finish', resolve)
+    stream.on('error', reject)
+  })
+
+  const uploaded = await cloudinary.uploader.upload(tmpPath, {
+    folder: 'invoices',
+    resource_type: 'raw',
+    public_id: `invoice-${order._id}`
+  })
+
+  order.invoiceUrl = uploaded.secure_url + '?fl_attachment=true'
+  await order.save()
+
+  if (fs.existsSync(tmpPath)) fs.unlink(tmpPath, () => { })
+
+  console.log(`[INVOICE] Generated: ${order.invoiceUrl}`)
+  return order.invoiceUrl
 }

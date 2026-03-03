@@ -1,14 +1,16 @@
 const Order = require('../models/order')
 const User = require('../models/user')
 const Product = require('../models/product')
-// const PDFDocument = require('pdfkit')
-// const fs = require('fs')
-// const path = require('path')
-// const cloudinary = require('../config/cloudinary')
 
 
 exports.createOrder = async (req, res) => {
   try {
+    const { shippingAddress } = req.body
+
+    if (!shippingAddress?.fullName || !shippingAddress?.address || !shippingAddress?.city || !shippingAddress?.state || !shippingAddress?.phone) {
+      return res.status(400).json({ message: 'Shipping address is required (fullName, phone, address, city, state)' })
+    }
+
     const user = await User.findById(req.user.id)
     if (!user || !user.cart.length) {
       return res.status(400).json({ message: 'Cart is empty' })
@@ -58,19 +60,16 @@ exports.createOrder = async (req, res) => {
         variant: variantData || null
       })
 
-      // We do NOT reduce stock here anymore. We reduce it in the webhook after payment.
+      // Stock is reduced after payment confirmation in webhook/verify
     }
 
     const order = await Order.create({
       user: req.user.id,
       items: orderItems,
       totalAmount: total,
+      shippingAddress,
       status: 'pending'
     })
-
-   
-
-    // ------------------ GENERATE PDF ------------------
 
     res.status(201).json({
       order,
