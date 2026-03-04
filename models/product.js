@@ -131,13 +131,12 @@ const productSchema = new mongoose.Schema(
 productSchema.pre('save', function (next) {
   if (Array.isArray(this.variants) && this.variants.length > 0) {
     const prices = this.variants.map(v => v.price).filter(Boolean)
-    const stocks = this.variants.map(v => v.stock || 0)
+    // We NO LONGER overwrite this.stock with the sum of variants here.
+    // This allows the base product to have its own independent stock.
 
     if (prices.length) {
       this.price = Math.min(...prices)
     }
-
-    this.stock = stocks.reduce((a, b) => a + b, 0)
   }
 
   next()

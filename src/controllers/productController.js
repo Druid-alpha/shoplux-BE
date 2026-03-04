@@ -331,9 +331,11 @@ exports.listProducts = async (req, res) => {
       .limit(limit)
       .sort(sortBy)
     const productsWithStock = products.map(prod => {
-      const totalStock = prod.variants?.length
+      const variantStock = prod.variants?.length
         ? prod.variants.reduce((sum, v) => sum + (v.stock || 0), 0)
-        : prod.stock || 0;
+        : 0;
+
+      const totalStock = (prod.stock || 0) + variantStock;
 
       return {
         ...prod.toObject(),
@@ -436,13 +438,11 @@ exports.getProduct = async (req, res) => {
       return res.status(404).json({ message: 'Product not found' })
     }
 
-    // Calculate total stock dynamically
-    let totalStock = 0;
+    // Calculate total stock dynamically (Base Stock + Variants Stock)
+    let totalStock = (product.stock || 0);
 
     if (product.variants?.length > 0) {
-      totalStock = product.variants.reduce((sum, v) => sum + (v.stock || 0), 0);
-    } else {
-      totalStock = product.stock || 0;
+      totalStock += product.variants.reduce((sum, v) => sum + (v.stock || 0), 0);
     }
 
     res.json({
@@ -853,14 +853,11 @@ exports.updateProduct = async (req, res) => {
       { new: true, runValidators: true }
     )
 
-    // Sync prices/stock if variants exist
+    // Sync prices if variants exist
     if (product.variants?.length > 0) {
       product.price = Math.min(...product.variants.map(v => v.price))
-      product.stock = product.variants.reduce((sum, v) => sum + (v.stock || 0), 0)
-    } else {
-      // If no variants, ensure price and stock are what was saved
-      if (data.price !== undefined) product.price = data.price
-      if (data.stock !== undefined) product.stock = data.stock
+      // ⚡ We NO LONGER overwrite product.stock here.
+      // The base stock and variant stock remain independent.
     }
 
     await product.save()
