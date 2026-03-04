@@ -641,6 +641,7 @@ exports.createProduct = async (req, res) => {
       clothingType: data.clothingType || null,
       tags: data.tags,
       discount: data.discount,
+       isDeleted: false,
       featured: data.featured,
       sku: data.sku || '',
       images,
