@@ -173,6 +173,7 @@ const buildQueryFromReq = async (req, { admin = false } = {}) => {
 ===================================================== */
 
 const variantSchema = z.object({
+   _id: objectId().optional(),
   sku: z.string().min(3),
   options: z.object({
     color: objectId().optional(),
@@ -785,27 +786,47 @@ exports.updateProduct = async (req, res) => {
       update.$set.images = images
     }
 
-    if (Array.isArray(data.variants)) {
-      const existingVariants = existingProduct.variants || []
+  if (Array.isArray(data.variants)) {
+  const existingVariants = existingProduct.variants || []
 
-      const updatedVariants = await Promise.all(
-        data.variants.map(async (variant, idx) => {
-          const existing = existingVariants.find(v => v.sku === variant.sku);
-          let image = existing?.image || null;
+  const updatedVariants = await Promise.all(
+    data.variants.map(async (variant, idx) => {
 
-          const file = req.files?.find(f => f.fieldname === `variant_${idx}`);
-          if (file) {
-            if (image?.public_id) await cloudinary.uploader.destroy(image.public_id);
-            const uploaded = await uploadToCloudinary(file.buffer, 'variants');
-            image = { url: uploaded.secure_url, public_id: uploaded.public_id };
-          }
+      // ✅ Match by _id instead of sku
+      const existing = variant._id
+        ? existingVariants.find(v => v._id.toString() === variant._id)
+        : null
 
-          return { ...variant, image };
-        })
-      );
+      let image = existing?.image || null
 
-      update.$set.variants = normalizeVariants(updatedVariants);
-    }
+      const file = req.files?.find(f => f.fieldname === `variant_${idx}`)
+
+      if (file) {
+        if (image?.public_id) {
+          await cloudinary.uploader.destroy(image.public_id)
+        }
+
+        const uploaded = await uploadToCloudinary(file.buffer, 'variants')
+
+        image = {
+          url: uploaded.secure_url,
+          public_id: uploaded.public_id
+        }
+      }
+
+      return {
+        ...(existing ? { _id: existing._id } : {}), // ✅ Preserve _id
+        sku: variant.sku,
+        options: variant.options,
+        price: Number(variant.price),
+        stock: Number(variant.stock),
+        image
+      }
+    })
+  )
+
+  update.$set.variants = normalizeVariants(updatedVariants)
+}
 
 
 
