@@ -47,9 +47,14 @@ exports.updateAvatar = async (req, res) => {
 
     const result = await uploadToCloudinary(req.file.buffer, 'avatars')
 
+    // Also update name if provided (prevents reverting)
+    const { name } = req.body
+    const updates = { avatar: result.secure_url }
+    if (name) updates.name = name
+
     const user = await User.findByIdAndUpdate(
       req.user.id,
-      { avatar: result.secure_url },
+      updates,
       { new: true }
     ).select('-password -refreshTokens')
 
