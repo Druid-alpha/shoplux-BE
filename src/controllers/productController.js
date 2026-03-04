@@ -93,7 +93,7 @@ const buildQueryFromReq = async (req, { admin = false } = {}) => {
     req.query.clothingType && req.query.clothingType !== 'all'
       ? req.query.clothingType
       : null;
- 
+
 
   // ✅ FINAL clothingType filter (ID OR NAME SAFE)
   if (
@@ -173,7 +173,7 @@ const buildQueryFromReq = async (req, { admin = false } = {}) => {
 ===================================================== */
 
 const variantSchema = z.object({
-   _id: objectId().optional(),
+  _id: objectId().optional(),
   sku: z.string().min(3),
   options: z.object({
     color: objectId().optional(),
@@ -208,7 +208,12 @@ const createSchema = z.object({
   discount: z.coerce.number().min(0).optional(),
   featured: z.boolean().optional(),
   clothingType: z.enum(['clothes', 'shoes', 'bag', 'eyeglass']).optional(),
-  variants: z.array(variantSchema).optional()
+  variants: z.array(variantSchema).optional(),
+  images: z.array(z.object({
+    url: z.string(),
+    public_id: z.string(),
+    _id: z.string().optional()
+  })).optional()
 })
 
 const updateSchema = createSchema.partial().extend({
@@ -559,7 +564,7 @@ exports.createProduct = async (req, res) => {
         category: data.category,
         isActive: true,
       })
-     
+
       if (!validBrand) {
         return res.status(400).json({
           message: 'Selected brand does not belong to selected category',
@@ -641,7 +646,7 @@ exports.createProduct = async (req, res) => {
       clothingType: data.clothingType || null,
       tags: data.tags,
       discount: data.discount,
-       isDeleted: false,
+      isDeleted: false,
       featured: data.featured,
       sku: data.sku || '',
       images,
@@ -748,105 +753,121 @@ exports.updateProduct = async (req, res) => {
     /* =======================
        MAIN PRODUCT IMAGES
     ======================= */
-    if (Array.isArray(req.files) && req.files.length > 0) {
-      // 🔥 Delete old images
-      if (existingProduct.images?.length) {
-        await Promise.all(
-          existingProduct.images.map(async img => {
-            if (img.public_id) {
-              try {
-                await cloudinary.uploader.destroy(img.public_id)
-              } catch (err) {
-                console.warn('Failed to delete image from Cloudinary:', img.public_id, err.message)
-              }
+    // 🔥 Improved Image Handling: Keep existing ones unless explicitly removed
+    let finalMainImages = []
+
+    // 1. Start with images from payload (the ones frontend wants to keep)
+    if (Array.isArray(payload.images)) {
+      finalMainImages = payload.images.map(img => ({
+        url: img.url,
+        public_id: img.public_id
+      }))
+    } else if (!req.files || req.files.length === 0) {
+      // If no new files AND no images array in payload, keep all existing (fallback for simple edits)
+      finalMainImages = existingProduct.images || []
+    }
+
+    // 2. Identify and delete images that were removed
+    const payloadPublicIds = new Set(finalMainImages.map(img => img.public_id))
+    const imagesToDelete = (existingProduct.images || []).filter(img => !payloadPublicIds.has(img.public_id))
+
+    if (imagesToDelete.length > 0) {
+      await Promise.all(
+        imagesToDelete.map(async img => {
+          if (img.public_id) {
+            try {
+              await cloudinary.uploader.destroy(img.public_id)
+            } catch (err) {
+              console.warn('Failed to delete image from Cloudinary:', img.public_id, err.message)
             }
-          })
-        )
-      }
-
-
-
-      // 🔥 Upload new images
-      const images = []
-      const mainImages = req.files.filter(
-        f => !f.fieldname.startsWith('variant_')
+          }
+        })
       )
+    }
 
-      for (const file of mainImages) {
-        const uploaded = await uploadToCloudinary(
-          file.buffer,
-          'products'
-        )
+    // 3. Upload new images and append
+    if (Array.isArray(req.files) && req.files.length > 0) {
+      const mainImagesFiles = req.files.filter(f => !f.fieldname.startsWith('variant_'))
 
-        images.push({
+      for (const file of mainImagesFiles) {
+        const uploaded = await uploadToCloudinary(file.buffer, 'products')
+        finalMainImages.push({
           url: uploaded.secure_url,
           public_id: uploaded.public_id
         })
       }
-
-      update.$set.images = images
     }
 
-  if (Array.isArray(data.variants)) {
-  const existingVariants = existingProduct.variants || []
+    update.$set.images = finalMainImages
 
-  const updatedVariants = await Promise.all(
-    data.variants.map(async (variant, idx) => {
+    /* =======================
+       VARIANTS
+    ======================= */
+    if (Array.isArray(payload.variants)) {
+      const existingVariants = existingProduct.variants || []
 
-      // ✅ Match by _id instead of sku
-      const existing = variant._id
-        ? existingVariants.find(v => v._id.toString() === variant._id)
-        : null
+      const updatedVariants = await Promise.all(
+        payload.variants.map(async (variant, idx) => {
+          // ✅ Match by _id or SKU
+          const existing = variant._id
+            ? existingVariants.find(v => v._id.toString() === variant._id)
+            : existingVariants.find(v => v.sku === variant.sku)
 
-      let image = existing?.image || null
+          let image = existing?.image || null
 
-      const file = req.files?.find(f => f.fieldname === `variant_${idx}`)
+          const file = req.files?.find(f => f.fieldname === `variant_${idx}`)
 
-      if (file) {
-        if (image?.public_id) {
-          await cloudinary.uploader.destroy(image.public_id)
-        }
+          if (file) {
+            if (image?.public_id) {
+              try {
+                await cloudinary.uploader.destroy(image.public_id)
+              } catch (err) {
+                console.warn('Failed to delete variant image:', image.public_id, err.message)
+              }
+            }
 
-        const uploaded = await uploadToCloudinary(file.buffer, 'variants')
+            const uploaded = await uploadToCloudinary(file.buffer, 'variants')
+            image = {
+              url: uploaded.secure_url,
+              public_id: uploaded.public_id
+            }
+          }
 
-        image = {
-          url: uploaded.secure_url,
-          public_id: uploaded.public_id
-        }
-      }
+          return {
+            ...(existing ? { _id: existing._id } : {}),
+            sku: variant.sku,
+            options: variant.options,
+            price: Number(variant.price),
+            stock: Number(variant.stock),
+            image
+          }
+        })
+      )
 
-      return {
-        ...(existing ? { _id: existing._id } : {}), // ✅ Preserve _id
-        sku: variant.sku,
-        options: variant.options,
-        price: Number(variant.price),
-        stock: Number(variant.stock),
-        image
-      }
-    })
-  )
-
-  update.$set.variants = normalizeVariants(updatedVariants)
-}
-
-
-
+      update.$set.variants = normalizeVariants(updatedVariants)
+    }
 
     const product = await Product.findByIdAndUpdate(
       id,
       update,
       { new: true, runValidators: true }
     )
-    product.price = product.variants?.length
-      ? Math.min(...product.variants.map(v => v.price))
-      : product.price;
+
+    // Sync prices/stock if variants exist
+    if (product.variants?.length > 0) {
+      product.price = Math.min(...product.variants.map(v => v.price))
+      product.stock = product.variants.reduce((sum, v) => sum + (v.stock || 0), 0)
+    } else {
+      // If no variants, ensure price and stock are what was saved
+      if (data.price !== undefined) product.price = data.price
+      if (data.stock !== undefined) product.stock = data.stock
+    }
 
     await product.save()
 
-
     res.json({ product })
   } catch (err) {
-    console.error(err)
+    console.error('UPDATE PRODUCT ERROR:', err)
     res.status(400).json({ message: err.message })
   }
 }
