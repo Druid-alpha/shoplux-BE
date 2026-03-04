@@ -21,7 +21,10 @@ exports.createOrder = async (req, res) => {
 
     for (const cartItem of user.cart) {
       const product = await Product.findById(cartItem.product)
-      if (!product) throw new Error('Product not found')
+      if (!product) {
+        console.warn(`[CREATE ORDER] Product ${cartItem.product} not found, skipping ghost item.`)
+        continue
+      }
 
       let price = product.price
       let variantData = null

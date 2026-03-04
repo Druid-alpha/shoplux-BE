@@ -6,6 +6,16 @@ const Product = require('../../models/product');
 exports.getCart = async (req, res) => {
   const user = await User.findById(req.user.id).populate('cart.product');
   if (!user) return res.status(404).json({ message: 'User not found' });
+
+  // ⚡ AUTO-CLEANUP: If any product was hard-deleted, remove it from the cart
+  const originalCount = user.cart.length;
+  user.cart = user.cart.filter(item => item.product !== null);
+
+  if (user.cart.length !== originalCount) {
+    await user.save();
+    console.log(`[CART CLEANUP] Removed ${originalCount - user.cart.length} dead items for user ${user._id}`);
+  }
+
   res.json({ cart: user.cart });
 };
 
@@ -16,7 +26,11 @@ exports.addToCart = async (req, res) => {
 
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ message: 'User not found' });
-if (!user.cart) user.cart = [] 
+    if (!user.cart) user.cart = []
+
+    // Pre-cleanup before adding
+    user.cart = user.cart.filter(i => i.product != null);
+
     const product = await Product.findById(productId);
     if (!product) return res.status(404).json({ message: 'Product not found' });
 
