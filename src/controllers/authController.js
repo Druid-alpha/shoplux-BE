@@ -237,7 +237,8 @@ exports.login = async (req, res) => {
                 id: user._id,
                 name: user.name,
                 email: user.email,
-                role: user.role
+                role: user.role,
+                avatar: user.avatar
             }
         })
 
@@ -284,7 +285,7 @@ exports.refresh = async (req, res) => {
         res.json({
             accessToken: newAccessToken,
             refreshToken: newRefreshToken,
-            user: { id: user._id, name: user.name, email: user.email, role: user.role }
+            user: { id: user._id, name: user.name, email: user.email, role: user.role, avatar: user.avatar }
         })
     } catch (error) {
         res.status(401).json({ message: 'invalid or expired token' })
