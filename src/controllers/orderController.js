@@ -29,9 +29,10 @@ exports.createOrder = async (req, res) => {
       let price = product.price
       let variantData = null
 
-      if (cartItem.variant && cartItem.variant.sku) {
+      if (cartItem.variant && (cartItem.variant._id || cartItem.variant.sku)) {
         const variant = product.variants.find(
-          v => String(v._id) === String(cartItem.variant._id)
+          v => (cartItem.variant._id && String(v._id) === String(cartItem.variant._id)) ||
+            (cartItem.variant.sku && v.sku === cartItem.variant.sku)
         )
 
         if (!variant) throw new Error('Variant not found')
