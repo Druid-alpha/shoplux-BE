@@ -446,13 +446,21 @@ exports.createFeatured = async (req, res) => {
 
 exports.getFeatured = async (req, res) => {
   try {
-    const products = await Product.find({
+    let products = await Product.find({
       isDeleted: false,
       featured: true
     })
       .populate('brand category variants.options.color color')
       .limit(12)
       .sort({ createdAt: -1 })
+
+    // FALLBACK: If no featured products, fetch latest 12
+    if (!products.length) {
+      products = await Product.find({ isDeleted: false })
+        .populate('brand category variants.options.color color')
+        .limit(12)
+        .sort({ createdAt: -1 })
+    }
 
     res.json({ products })
   } catch (err) {
