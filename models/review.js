@@ -8,7 +8,8 @@ const reviewSchema = new mongoose.Schema({
     body: { type: String },
     isVerified: { type: Boolean, default: false },
     helpful: { type: Number, default: 0 },
-    helpfulUsers: [{ type: mongoose.Schema.ObjectId, ref: 'User' }]
+    helpfulUsers: [{ type: mongoose.Schema.ObjectId, ref: 'User' }],
+    isFeatured: { type: Boolean, default: false }
 
 },
     { timestamps: true }

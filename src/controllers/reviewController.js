@@ -165,6 +165,20 @@ exports.toggleHelpful = async (req, res) => {
   }
 }
 
+exports.toggleFeaturedReview = async (req, res) => {
+  try {
+    const { reviewId } = req.params
+    const review = await Review.findById(reviewId)
+    if (!review) return res.status(404).json({ message: 'Review not found' })
+
+    review.isFeatured = !review.isFeatured
+    await review.save()
+    res.json({ message: 'Review featured status updated', isFeatured: review.isFeatured })
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to toggle featured status' })
+  }
+}
+
 /* ================= ADMIN ================= */
 exports.listAllReviews = async (req, res) => {
   try {
@@ -187,12 +201,26 @@ exports.listAllReviews = async (req, res) => {
 
 exports.getFeaturedReviews = async (req, res) => {
   try {
-    // Top 5-star reviews with body content
-    const reviews = await Review.find({ rating: { $gte: 4 }, body: { $ne: '' } })
+    // 1. Prioritize manually featured reviews
+    let reviews = await Review.find({ isFeatured: true })
       .populate('user', 'name avatar')
       .populate('product', 'title')
-      .limit(6)
-      .sort({ helpful: -1, createdAt: -1 })
+      .sort({ createdAt: -1 })
+
+    // 2. If fewer than 4 featured, fill with top-rated helpful reviews
+    if (reviews.length < 4) {
+      const topRated = await Review.find({
+        rating: { $gte: 4 },
+        body: { $ne: '' },
+        _id: { $nin: reviews.map(r => r._id) }
+      })
+        .populate('user', 'name avatar')
+        .populate('product', 'title')
+        .limit(6 - reviews.length)
+        .sort({ helpful: -1, createdAt: -1 })
+
+      reviews = [...reviews, ...topRated]
+    }
 
     res.json({ reviews })
   } catch (err) {
