@@ -164,3 +164,38 @@ exports.toggleHelpful = async (req, res) => {
     res.status(500).json({ message: 'Failed to update helpful vote' })
   }
 }
+
+/* ================= ADMIN ================= */
+exports.listAllReviews = async (req, res) => {
+  try {
+    const page = Math.max(1, Number(req.query.page || 1))
+    const limit = Math.min(100, Number(req.query.limit || 20))
+
+    const total = await Review.countDocuments()
+    const reviews = await Review.find()
+      .populate('user', 'name email avatar')
+      .populate('product', 'title images')
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+
+    res.json({ reviews, total, pages: Math.ceil(total / limit), page })
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to fetch reviews' })
+  }
+}
+
+exports.getFeaturedReviews = async (req, res) => {
+  try {
+    // Top 5-star reviews with body content
+    const reviews = await Review.find({ rating: { $gte: 4 }, body: { $ne: '' } })
+      .populate('user', 'name avatar')
+      .populate('product', 'title')
+      .limit(6)
+      .sort({ helpful: -1, createdAt: -1 })
+
+    res.json({ reviews })
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to fetch featured reviews' })
+  }
+}
