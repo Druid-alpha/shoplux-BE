@@ -100,7 +100,7 @@ const productSchema = new mongoose.Schema(
 
     clothingType: {
       type: String,
-      enum: ['clothes', 'shoes', 'bag', 'eyeglass'],
+      enum: ['clothes', 'shoes', 'bags', 'eyeglass'],
       default: null,
       index: true
     },

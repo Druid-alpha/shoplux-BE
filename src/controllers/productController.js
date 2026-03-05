@@ -118,20 +118,25 @@ const buildQueryFromReq = async (req, { admin = false } = {}) => {
 
 
 
-  // Brand
-  if (req.query.brand && req.query.brand !== 'all' && isValidObjectId(req.query.brand)) {
-    andConditions.push({ brand: toObjectId(req.query.brand) })
+  // Brand (Supports Multi-select via comma separated IDs)
+  if (req.query.brand && req.query.brand !== 'all') {
+    const brandIds = req.query.brand.split(',').filter(isValidObjectId).map(toObjectId)
+    if (brandIds.length > 0) {
+      andConditions.push({ brand: { $in: brandIds } })
+    }
   }
 
-  // Color (main or variant)
-  if (req.query.color && req.query.color !== 'all' && isValidObjectId(req.query.color)) {
-    const colorId = toObjectId(req.query.color)
-    andConditions.push({
-      $or: [
-        { color: colorId },
-        { 'variants.options.color': colorId }
-      ]
-    })
+  // Color (Supports Multi-select via comma separated IDs)
+  if (req.query.color && req.query.color !== 'all') {
+    const colorIds = req.query.color.split(',').filter(isValidObjectId).map(toObjectId)
+    if (colorIds.length > 0) {
+      andConditions.push({
+        $or: [
+          { color: { $in: colorIds } },
+          { 'variants.options.color': { $in: colorIds } }
+        ]
+      })
+    }
   }
 
 
@@ -161,6 +166,43 @@ const buildQueryFromReq = async (req, { admin = false } = {}) => {
     })
   }
 
+
+  // Availability
+  if (req.query.availability) {
+    const statuses = req.query.availability.split(',');
+    const availConditions = [];
+
+    if (statuses.includes('in_stock')) {
+      availConditions.push({
+        $or: [
+          { variants: { $size: 0 }, stock: { $gt: 0 } },
+          { 'variants.stock': { $gt: 0 } }
+        ]
+      });
+    }
+    if (statuses.includes('out_of_stock')) {
+      availConditions.push({
+        $and: [
+          { variants: { $size: 0 }, stock: { $lte: 0 } },
+          {
+            $or: [
+              { variants: { $exists: false } },
+              { variants: { $size: 0 } },
+              { 'variants.stock': { $lte: 0 } }
+            ]
+          }
+        ]
+      });
+    }
+
+    if (availConditions.length > 0) {
+      if (availConditions.length === 1) {
+        andConditions.push(availConditions[0]);
+      } else {
+        andConditions.push({ $or: availConditions });
+      }
+    }
+  }
 
   if (andConditions.length > 0) q.$and = andConditions
 
@@ -207,7 +249,7 @@ const createSchema = z.object({
   stock: z.coerce.number().min(0).optional(),
   discount: z.coerce.number().min(0).optional(),
   featured: z.boolean().optional(),
-  clothingType: z.enum(['clothes', 'shoes', 'bag', 'eyeglass']).optional(),
+  clothingType: z.enum(['clothes', 'shoes', 'bags', 'eyeglass']).optional(),
   variants: z.array(variantSchema).optional(),
   images: z.array(z.object({
     url: z.string(),
@@ -248,7 +290,6 @@ exports.getFilterOptions = async (req, res) => {
 
     let brands = [];
     let colors = [];
-    let sizes = [];
     let clothingTypes = [];
 
     // Validate category
@@ -264,48 +305,39 @@ exports.getFilterOptions = async (req, res) => {
       }
     }
 
-    // Normalize clothingType query
-    const clothingType =
-      req.query.clothingType && req.query.clothingType !== 'all'
-        ? req.query.clothingType
-        : null;
+    // Colors - make them global or scoped? Shopify typically scopes facets to the results.
+    // However, to make it snappy, we'll scope them to the category if selected.
+    const productFilter = { isDeleted: false };
+    if (categoryId) productFilter.category = categoryId;
 
-    // Colors - make them global so they show for all categories
-    colors = await Color.find().select('_id name hex');
+    // Fetch dynamic facets based on available products
+    const [brandIds, colorIdsFromMain, colorIdsFromVariants] = await Promise.all([
+      Product.distinct('brand', productFilter),
+      Product.distinct('color', productFilter),
+      Product.distinct('variants.options.color', productFilter)
+    ]);
+
+    const combinedColorIds = [...new Set([...colorIdsFromMain, ...colorIdsFromVariants])].filter(Boolean);
+
+    [brands, colors] = await Promise.all([
+      Brand.find({ _id: { $in: brandIds }, isActive: true }).select('_id name'),
+      Color.find({ _id: { $in: combinedColorIds } }).select('_id name hex')
+    ]);
 
     if (categoryId) {
       const category = await Category.findById(categoryId);
-      const isClothing = category?.name.toLowerCase() === 'clothing';
-
-      // ⚡ ROBUST BRAND FETCH: Get brands actually used by products in this category
-      const productFilter = { category: categoryId, isDeleted: false };
-      if (isClothing && clothingType && ['clothes', 'shoes', 'bag', 'eyeglass'].includes(clothingType)) {
-        productFilter.clothingType = clothingType;
+      if (category?.name.toLowerCase() === 'clothing') {
+        clothingTypes = ['clothes', 'shoes', 'bags', 'eyeglass'];
       }
-      const brandIds = await Product.distinct('brand', productFilter);
-      brands = await Brand.find({
-        _id: { $in: brandIds },
-        isActive: true,
-      }).select('_id name');
-
-      if (isClothing) {
-        clothingTypes = ['clothes', 'shoes', 'bag', 'eyeglass'];
-        // Sizes by type
-        if (clothingType === 'clothes') sizes = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
-        else if (clothingType === 'shoes') sizes = ['38', '39', '40', '41', '42', '43', '44', '45'];
-        else sizes = [];
-      } else {
-        clothingTypes = [];
-        sizes = [];
-      }
-    } else {
-      // No category selected → show all brands/colors
-      brands = await Brand.find({ isActive: true }).select('_id name');
-      clothingTypes = [];
-      sizes = [];
     }
 
-    res.json({ categories, brands, clothingTypes, colors, sizes });
+    // Availability is static facets
+    const availability = [
+      { label: 'In Stock', value: 'in_stock' },
+      { label: 'Out of Stock', value: 'out_of_stock' }
+    ];
+
+    res.json({ categories, brands, clothingTypes, colors, availability });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Failed to fetch filter options' });
@@ -321,7 +353,17 @@ exports.listProducts = async (req, res) => {
   try {
     const page = Math.max(1, Number(req.query.page || 1))
     const limit = Math.min(100, Number(req.query.limit || 12))
-    const sortBy = req.query.sortBy || '-createdAt'
+    let sortByQuery = '-createdAt'
+    if (req.query.sortBy) {
+      switch (req.query.sortBy) {
+        case 'price-asc': sortByQuery = 'price'; break;
+        case 'price-desc': sortByQuery = '-price'; break;
+        case 'newest': sortByQuery = '-createdAt'; break;
+        case 'rating': sortByQuery = '-avgRating'; break;
+        default: sortByQuery = '-createdAt';
+      }
+    }
+
     const query = await buildQueryFromReq(req)
     console.log('SHOP QUERY:', JSON.stringify(query, null, 2))
     const total = await Product.countDocuments(query)
@@ -329,7 +371,7 @@ exports.listProducts = async (req, res) => {
       .populate('brand category variants.options.color color')
       .skip((page - 1) * limit)
       .limit(limit)
-      .sort(sortBy)
+      .sort(sortByQuery)
     const productsWithStock = products.map(prod => {
       const variantStock = prod.variants?.length
         ? prod.variants.reduce((sum, v) => sum + (v.stock || 0), 0)

@@ -6,8 +6,11 @@ const reviewSchema = new mongoose.Schema({
     rating: { type: Number, required: true, min: 1, max: 5 },
     title: { type: String },
     body: { type: String },
+    isVerified: { type: Boolean, default: false },
+    helpful: { type: Number, default: 0 },
+    helpfulUsers: [{ type: mongoose.Schema.ObjectId, ref: 'User' }]
 
 },
     { timestamps: true }
 )
-module.exports=mongoose.model('Review',reviewSchema)
+module.exports = mongoose.model('Review', reviewSchema)

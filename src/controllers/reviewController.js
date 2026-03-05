@@ -1,5 +1,6 @@
 const Review = require('../../models/review')
 const Product = require('../../models/product')
+const Order = require('../../models/order')
 const mongoose = require('mongoose')
 const { z } = require('zod')
 
@@ -48,12 +49,20 @@ exports.createReview = async (req, res) => {
     const existing = await Review.findOne({ product: productId, user: req.user.id })
     if (existing) return res.status(400).json({ message: 'You already reviewed this product' })
 
+    // ✅ Check if user purchased this product (Verified Purchase)
+    const hasOrdered = await Order.findOne({
+      user: req.user.id,
+      'items.product': productId,
+      paymentStatus: 'paid'
+    })
+
     const review = await Review.create({
       product: productId,
       user: req.user.id,
       rating: data.rating,
       title: data.title,
       body: data.body,
+      isVerified: !!hasOrdered
     })
 
     await recalcProductRating(productId)
@@ -68,10 +77,15 @@ exports.createReview = async (req, res) => {
 /* ================= READ ================= */
 exports.getReviewsForProduct = async (req, res) => {
   try {
-    const { productId } = req.params
+    const { productId, sort } = req.params
+
+    let sortQuery = { createdAt: -1 } // newest
+    if (sort === 'highest') sortQuery = { rating: -1 }
+    if (sort === 'lowest') sortQuery = { rating: 1 }
+
     const reviews = await Review.find({ product: productId })
       .populate('user', 'name avatar')
-      .sort({ createdAt: -1 })
+      .sort(sortQuery)
     res.json({ reviews })
   } catch (err) {
     res.status(500).json({ message: 'Failed to load reviews' })
@@ -123,5 +137,30 @@ exports.deleteReview = async (req, res) => {
     res.json({ message: 'Review deleted' })
   } catch (err) {
     res.status(500).json({ message: 'Failed to delete review' })
+  }
+}
+
+/* ================= HELP VOTE ================= */
+exports.toggleHelpful = async (req, res) => {
+  try {
+    const { reviewId } = req.params
+    const userId = req.user.id
+
+    const review = await Review.findById(reviewId)
+    if (!review) return res.status(404).json({ message: 'Review not found' })
+
+    const index = review.helpfulUsers.indexOf(userId)
+    if (index === -1) {
+      review.helpfulUsers.push(userId)
+      review.helpful += 1
+    } else {
+      review.helpfulUsers.splice(index, 1)
+      review.helpful -= 1
+    }
+
+    await review.save()
+    res.json({ helpful: review.helpful, isHelpful: index === -1 })
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to update helpful vote' })
   }
 }

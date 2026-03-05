@@ -27,6 +27,12 @@ exports.createOrder = async (req, res) => {
       }
 
       let price = product.price
+
+      // ✅ Apply Discount logic
+      if (product.discount > 0) {
+        price = price * (1 - product.discount / 100)
+      }
+
       let variantData = null
 
       if (cartItem.variant && (cartItem.variant._id || cartItem.variant.sku)) {
