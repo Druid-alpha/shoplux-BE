@@ -140,40 +140,30 @@ exports.getAllOrders = async (req, res) => {
 
 exports.updateOrderStatus = async (req, res) => {
   try {
+    if (req.user?.role !== 'admin') {
+      return res.status(403).json({ message: 'Access denied: Admins only' })
+    }
+
     const { status, paymentStatus } = req.body
     const order = await Order.findById(req.params.id)
     if (!order) return res.status(404).json({ message: 'Order not found' })
 
-    if (status) order.status = status
-    if (paymentStatus) order.paymentStatus = paymentStatus
-    /* ================= ADMIN MANUAL PAYMENT STOCK FIX ================= */
-    if (paymentStatus === 'paid' && order.paymentStatus !== 'paid') {
-
-      for (const item of order.items) {
-
-        const product = await Product.findById(item.product)
-        if (!product) continue
-
-        if (item.variant?._id) {
-          await Product.updateOne(
-            { _id: product._id, "variants._id": item.variant._id },
-            { $inc: { "variants.$.stock": -item.qty } }
-          )
-        } else {
-          await Product.updateOne(
-            {
-              _id: product._id,
-              stock: { $gte: item.qty }
-            },
-            {
-              $inc: { stock: -item.qty }
-            }
-          )
-        }
-      }
-
-      order.status = 'paid'
+    // paymentStatus is controlled by Paystack verify/webhook flows only
+    if (typeof paymentStatus !== 'undefined') {
+      return res.status(400).json({
+        message: 'paymentStatus is managed automatically after payment verification and cannot be changed manually'
+      })
     }
+
+    const allowedStatuses = ['pending', 'paid', 'processing', 'shipped', 'delivered', 'failed', 'cancelled']
+    if (!status) {
+      return res.status(400).json({ message: 'status is required' })
+    }
+    if (!allowedStatuses.includes(status)) {
+      return res.status(400).json({ message: 'Invalid order status value' })
+    }
+
+    order.status = status
     await order.save()
     res.json({ order })
   } catch (error) {

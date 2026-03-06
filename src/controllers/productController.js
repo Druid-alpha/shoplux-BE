@@ -1,4 +1,4 @@
-const mongoose = require('mongoose')
+﻿const mongoose = require('mongoose')
 const { z } = require('zod')
 const cloudinary = require('../config/cloudinary') // adjust the path
 
@@ -38,23 +38,38 @@ const normalizeVariants = (variants = []) =>
     image: v.image?.url && v.image?.public_id ? v.image : null
   }))
 
+const CLOTHING_TYPES = ['clothes', 'shoes', 'bags', 'eyeglass']
+
+const parseObjectIdList = (value) => {
+  if (!value) return []
+  return String(value)
+    .split(',')
+    .map(v => v.trim())
+    .filter(isValidObjectId)
+    .map(toObjectId)
+}
+
+const resolveCategory = async (categoryParam) => {
+  if (!categoryParam || categoryParam === 'all') return null
+
+  if (isValidObjectId(categoryParam)) {
+    return Category.findById(categoryParam).select('_id name')
+  }
+
+  return Category.findOne({
+    name: new RegExp(`^${categoryParam}$`, 'i')
+  }).select('_id name')
+}
+
 
 
 
 
 // Build Mongo query from request safely
 const buildQueryFromReq = async (req, { admin = false } = {}) => {
-
-
   const q = {}
   if (!admin) q.isDeleted = false
   const andConditions = []
-
-  // 🛑 SURGICAL FIX #2
-  // Prevent clothingType from applying outside clothing category
-  // CLOTHING TYPE (SAFE – NEVER KILLS RESULTS)
-
-
 
   // Search
   if (req.query.search) {
@@ -68,67 +83,42 @@ const buildQueryFromReq = async (req, { admin = false } = {}) => {
     })
   }
 
-  // Category
-  // -----------------------
-  // CATEGORY (ID OR NAME)
-  // -----------------------
-  if (req.query.category && req.query.category !== 'all') {
-    let categoryId = null
-
-    if (isValidObjectId(req.query.category)) {
-      categoryId = toObjectId(req.query.category)
-    } else {
-      const category = await Category.findOne({
-        name: new RegExp(`^${req.query.category}$`, 'i')
-      }).select('_id')
-      if (category) categoryId = category._id
-    }
-
-    if (categoryId) {
-      andConditions.push({ category: categoryId })
-    }
+  // Category (ID or name)
+  const category = await resolveCategory(req.query.category)
+  if (req.query.category && req.query.category !== 'all' && !category) {
+    andConditions.push({ _id: { $in: [] } })
+  }
+  if (category) {
+    andConditions.push({ category: category._id })
   }
 
+  // Clothing type (allowed only for clothing category)
   const clothingType =
     req.query.clothingType && req.query.clothingType !== 'all'
-      ? req.query.clothingType
-      : null;
-
-
-  // ✅ FINAL clothingType filter (ID OR NAME SAFE)
-  if (
-    req.query.clothingType &&
-    req.query.clothingType !== 'all' &&
-    req.query.category
-  ) {
-    let category = null
-
-    if (isValidObjectId(req.query.category)) {
-      category = await Category.findById(req.query.category).select('name')
+      ? String(req.query.clothingType).toLowerCase()
+      : null
+  const isClothingCategory = category?.name?.toLowerCase() === 'clothing'
+  if (clothingType) {
+    if (!isClothingCategory || !CLOTHING_TYPES.includes(clothingType)) {
+      andConditions.push({ _id: { $in: [] } })
     } else {
-      category = await Category.findOne({
-        name: new RegExp(`^${req.query.category}$`, 'i')
-      }).select('name')
-    }
-
-    if (category?.name?.toLowerCase() === 'clothing') {
-      andConditions.push({ clothingType: req.query.clothingType })
+      andConditions.push({ clothingType })
     }
   }
 
-
-
-  // Brand (Supports Multi-select via comma separated IDs)
+  // Brand (supports comma-separated IDs)
   if (req.query.brand && req.query.brand !== 'all') {
-    const brandIds = req.query.brand.split(',').filter(isValidObjectId).map(toObjectId)
+    const brandIds = parseObjectIdList(req.query.brand)
     if (brandIds.length > 0) {
       andConditions.push({ brand: { $in: brandIds } })
+    } else {
+      andConditions.push({ _id: { $in: [] } })
     }
   }
 
-  // Color (Supports Multi-select via comma separated IDs)
+  // Color (supports comma-separated IDs)
   if (req.query.color && req.query.color !== 'all') {
-    const colorIds = req.query.color.split(',').filter(isValidObjectId).map(toObjectId)
+    const colorIds = parseObjectIdList(req.query.color)
     if (colorIds.length > 0) {
       andConditions.push({
         $or: [
@@ -136,9 +126,10 @@ const buildQueryFromReq = async (req, { admin = false } = {}) => {
           { 'variants.options.color': { $in: colorIds } }
         ]
       })
+    } else {
+      andConditions.push({ _id: { $in: [] } })
     }
   }
-
 
   // Tags
   if (req.query.tags) {
@@ -153,12 +144,10 @@ const buildQueryFromReq = async (req, { admin = false } = {}) => {
 
     andConditions.push({
       $or: [
-        // products WITHOUT variants → use base price
         {
           variants: { $size: 0 },
           price: priceQuery
         },
-        // products WITH variants → use variant prices ONLY
         {
           'variants.price': priceQuery
         }
@@ -166,11 +155,10 @@ const buildQueryFromReq = async (req, { admin = false } = {}) => {
     })
   }
 
-
   // Availability
   if (req.query.availability) {
-    const statuses = req.query.availability.split(',');
-    const availConditions = [];
+    const statuses = req.query.availability.split(',')
+    const availConditions = []
 
     if (statuses.includes('in_stock')) {
       availConditions.push({
@@ -178,8 +166,9 @@ const buildQueryFromReq = async (req, { admin = false } = {}) => {
           { variants: { $size: 0 }, stock: { $gt: 0 } },
           { 'variants.stock': { $gt: 0 } }
         ]
-      });
+      })
     }
+
     if (statuses.includes('out_of_stock')) {
       availConditions.push({
         $and: [
@@ -192,20 +181,19 @@ const buildQueryFromReq = async (req, { admin = false } = {}) => {
             ]
           }
         ]
-      });
+      })
     }
 
     if (availConditions.length > 0) {
       if (availConditions.length === 1) {
-        andConditions.push(availConditions[0]);
+        andConditions.push(availConditions[0])
       } else {
-        andConditions.push({ $or: availConditions });
+        andConditions.push({ $or: availConditions })
       }
     }
   }
 
   if (andConditions.length > 0) q.$and = andConditions
-
   return q
 }
 
@@ -286,63 +274,91 @@ const updateSchema = createSchema.partial().extend({
 
 exports.getFilterOptions = async (req, res) => {
   try {
-    const categories = await Category.find().select('_id name');
+    const categories = await Category.find().select('_id name')
 
-    let brands = [];
-    let colors = [];
-    let clothingTypes = [];
+    const category = await resolveCategory(req.query.category)
+    const isClothingCategory = category?.name?.toLowerCase() === 'clothing'
+    const clothingType = req.query.clothingType && req.query.clothingType !== 'all'
+      ? String(req.query.clothingType).toLowerCase()
+      : null
+    const selectedBrandIds = parseObjectIdList(req.query.brand)
+    const selectedColorIds = parseObjectIdList(req.query.color)
 
-    // Validate category
-    let categoryId = null;
-    if (req.query.category && req.query.category !== 'all') {
-      if (mongoose.Types.ObjectId.isValid(req.query.category)) {
-        categoryId = req.query.category;
-      } else {
-        const category = await Category.findOne({
-          name: new RegExp(`^${req.query.category}$`, 'i'),
-        }).select('_id');
-        if (category) categoryId = category._id;
-      }
+    const baseFilter = { isDeleted: false }
+    if (category) baseFilter.category = category._id
+    if (clothingType && isClothingCategory && CLOTHING_TYPES.includes(clothingType)) {
+      baseFilter.clothingType = clothingType
     }
 
-    // Colors - make them global or scoped? Shopify typically scopes facets to the results.
-    // However, to make it snappy, we'll scope them to the category if selected.
-    const productFilter = { isDeleted: false };
-    if (categoryId) productFilter.category = categoryId;
+    if (clothingType && (!isClothingCategory || !CLOTHING_TYPES.includes(clothingType))) {
+      return res.json({
+        categories,
+        brands: [],
+        clothingTypes: [],
+        colors: [],
+        availability: [
+          { label: 'In Stock', value: 'in_stock' },
+          { label: 'Out of Stock', value: 'out_of_stock' }
+        ],
+        message: 'No products found for the selected filters'
+      })
+    }
 
-    // Fetch dynamic facets based on available products
-    const [brandIds, colorIdsFromMain, colorIdsFromVariants] = await Promise.all([
-      Product.distinct('brand', productFilter),
-      Product.distinct('color', productFilter),
-      Product.distinct('variants.options.color', productFilter)
-    ]);
+    // Brand facet respects category + clothingType + selected color
+    const brandScope = { ...baseFilter }
+    if (selectedColorIds.length) {
+      brandScope.$or = [
+        { color: { $in: selectedColorIds } },
+        { 'variants.options.color': { $in: selectedColorIds } }
+      ]
+    }
+    const brandIds = await Product.distinct('brand', brandScope)
 
-    const combinedColorIds = [...new Set([...colorIdsFromMain, ...colorIdsFromVariants])].filter(Boolean);
+    // Color facet respects category + clothingType + selected brand
+    const colorScope = { ...baseFilter }
+    if (selectedBrandIds.length) {
+      colorScope.brand = { $in: selectedBrandIds }
+    }
+    const [colorIdsFromMain, colorIdsFromVariants] = await Promise.all([
+      Product.distinct('color', colorScope),
+      Product.distinct('variants.options.color', colorScope)
+    ])
+    const combinedColorIds = [...new Set([...colorIdsFromMain, ...colorIdsFromVariants])].filter(Boolean)
 
-    [brands, colors] = await Promise.all([
+    const [brands, colors] = await Promise.all([
       Brand.find({ _id: { $in: brandIds }, isActive: true }).select('_id name'),
       Color.find({ _id: { $in: combinedColorIds } }).select('_id name hex')
-    ]);
+    ])
 
-    if (categoryId) {
-      const category = await Category.findById(categoryId);
-      if (category?.name.toLowerCase() === 'clothing') {
-        clothingTypes = ['clothes', 'shoes', 'bags', 'eyeglass'];
-      }
-    }
-
-    // Availability is static facets
+    const clothingTypes = isClothingCategory ? CLOTHING_TYPES : []
     const availability = [
       { label: 'In Stock', value: 'in_stock' },
       { label: 'Out of Stock', value: 'out_of_stock' }
-    ];
+    ]
 
-    res.json({ categories, brands, clothingTypes, colors, availability });
+    const activeProductFilter = { ...baseFilter }
+    if (selectedBrandIds.length) activeProductFilter.brand = { $in: selectedBrandIds }
+    if (selectedColorIds.length) {
+      activeProductFilter.$or = [
+        { color: { $in: selectedColorIds } },
+        { 'variants.options.color': { $in: selectedColorIds } }
+      ]
+    }
+    const matchedProducts = await Product.countDocuments(activeProductFilter)
+
+    res.json({
+      categories,
+      brands,
+      clothingTypes,
+      colors,
+      availability,
+      message: matchedProducts === 0 ? 'No products found for the selected filters' : undefined
+    })
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Failed to fetch filter options' });
+    console.error(err)
+    res.status(500).json({ message: 'Failed to fetch filter options' })
   }
-};
+}
 
 
 /* =====================================================
@@ -367,6 +383,18 @@ exports.listProducts = async (req, res) => {
     const query = await buildQueryFromReq(req)
     console.log('SHOP QUERY:', JSON.stringify(query, null, 2))
     const total = await Product.countDocuments(query)
+    const totalPages = Math.max(1, Math.ceil(total / limit))
+
+    if (total === 0) {
+      return res.json({
+        products: [],
+        total: 0,
+        page: 1,
+        pages: 1,
+        message: 'No products found for the selected filters'
+      })
+    }
+
     const products = await Product.find(query)
       .populate('brand category variants.options.color color')
       .skip((page - 1) * limit)
@@ -390,7 +418,8 @@ exports.listProducts = async (req, res) => {
       products: productsWithStock,
       total,
       page,
-      pages: Math.ceil(total / limit)
+      pages: totalPages,
+      message: null
     });
   } catch (err) {
     console.error(err)
@@ -606,7 +635,7 @@ exports.createProduct = async (req, res) => {
     }
 
     /* =======================
-       VALIDATE BRAND ↔ CATEGORY
+       VALIDATE BRAND ? CATEGORY
     ======================= */
     if (data.brand) {
       const validBrand = await Brand.findOne({
@@ -742,7 +771,7 @@ exports.updateProduct = async (req, res) => {
 
     const data = updateSchema.parse(payload)
 
-    // 🔹 Fetch existing product FIRST
+    // ?? Fetch existing product FIRST
     const existingProduct = await Product.findById(id)
     if (!existingProduct) {
       return res.status(404).json({ message: 'Product not found' })
@@ -803,7 +832,7 @@ exports.updateProduct = async (req, res) => {
     /* =======================
        MAIN PRODUCT IMAGES
     ======================= */
-    // 🔥 Improved Image Handling: Keep existing ones unless explicitly removed
+    // ?? Improved Image Handling: Keep existing ones unless explicitly removed
     let finalMainImages = []
 
     // 1. Start with images from payload (the ones frontend wants to keep)
@@ -858,7 +887,7 @@ exports.updateProduct = async (req, res) => {
 
       const updatedVariants = await Promise.all(
         payload.variants.map(async (variant, idx) => {
-          // ✅ Match by _id or SKU
+          // ? Match by _id or SKU
           const existing = variant._id
             ? existingVariants.find(v => v._id.toString() === variant._id)
             : existingVariants.find(v => v.sku === variant.sku)
@@ -906,7 +935,7 @@ exports.updateProduct = async (req, res) => {
     // Sync prices if variants exist
     if (product.variants?.length > 0) {
       product.price = Math.min(...product.variants.map(v => v.price))
-      // ⚡ We NO LONGER overwrite product.stock here.
+      // ? We NO LONGER overwrite product.stock here.
       // The base stock and variant stock remain independent.
     }
 
@@ -956,7 +985,7 @@ exports.updateVariants = async (req, res) => {
         const file = req.files?.find(f => f.fieldname === field)
 
         if (file) {
-          // 🔥 delete old variant image
+          // ?? delete old variant image
           if (image.public_id) {
             try {
               await cloudinary.uploader.destroy(image.public_id)
@@ -1196,3 +1225,4 @@ exports.hardDeleteAllProducts = async (req, res) => {
     res.status(500).json({ message: 'Failed to hard delete products' })
   }
 }
+
