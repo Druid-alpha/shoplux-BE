@@ -155,12 +155,16 @@ exports.updateOrderStatus = async (req, res) => {
       })
     }
 
-    const allowedStatuses = ['pending', 'paid', 'processing', 'shipped', 'delivered', 'failed', 'cancelled']
+    // Admin should only set operational fulfillment states.
+    // Payment-related states are managed by payment flows.
+    const allowedStatuses = ['pending', 'processing', 'shipped', 'delivered']
     if (!status) {
       return res.status(400).json({ message: 'status is required' })
     }
     if (!allowedStatuses.includes(status)) {
-      return res.status(400).json({ message: 'Invalid order status value' })
+      return res.status(400).json({
+        message: 'Invalid order status value. Allowed: pending, processing, shipped, delivered'
+      })
     }
 
     order.status = status

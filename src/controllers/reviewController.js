@@ -101,8 +101,8 @@ exports.updateReview = async (req, res) => {
     const review = await Review.findById(reviewId)
     if (!review) return res.status(404).json({ message: 'Review not found' })
 
-    // ✅ Allow owner OR admin
-    if (!review.user.equals(req.user.id) && !req.user.isAdmin) {
+    // Allow owner OR admin role from auth middleware
+    if (!review.user.equals(req.user.id) && req.user?.role !== 'admin') {
       return res.status(403).json({ message: 'Not authorized' })
     }
 
@@ -126,8 +126,8 @@ exports.deleteReview = async (req, res) => {
     const review = await Review.findById(reviewId)
     if (!review) return res.status(404).json({ message: 'Review not found' })
 
-    // ✅ Allow owner OR admin
-    if (!review.user.equals(req.user.id) && !req.user.isAdmin) {
+    // Allow owner OR admin role from auth middleware
+    if (!review.user.equals(req.user.id) && req.user?.role !== 'admin') {
       return res.status(403).json({ message: 'Not authorized' })
     }
 
