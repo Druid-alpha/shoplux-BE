@@ -226,6 +226,7 @@ exports.login = async (req, res) => {
         const refreshToken = signRefreshToken({ id: user._id })
         user.refreshTokens.push({ token: refreshToken })
         user.lastSignedIn = new Date()
+        user.isOnline = true
         await user.save()
         res.cookie('accessToken', accessToken, cookieOption(1 * 60 * 60 * 1000))
         res.cookie('refreshToken', refreshToken, cookieOption(7 * 24 * 60 * 60 * 1000))
@@ -295,22 +296,29 @@ exports.refresh = async (req, res) => {
 exports.logOut = async (req, res) => {
     try {
         const currRefreshToken = req.cookies?.refreshToken || req.body?.refreshToken
+
         if (currRefreshToken) {
             try {
                 const decoded = verifyRefreshToken(currRefreshToken)
                 const user = await User.findById(decoded.id)
                 if (user) {
-                    user.refreshTokens = user.refreshTokens.map(rt => rt.token === currRefreshToken ? { ...rt.toObject(), revoked: true } : rt)
+                    user.refreshTokens = user.refreshTokens.map(rt =>
+                        rt.token === currRefreshToken
+                            ? { ...rt.toObject(), revoked: true }
+                            : rt
+                    )
+                    user.isOnline = false
+                    user.lastLoggedOutAt = new Date()
                     await user.save()
                 }
             } catch (error) {
-
+                // ignore invalid refresh token; continue logout response
             }
-            res.clearCookie('accessToken', cookieOption())
-            res.clearCookie('refreshToken', cookieOption())
-
-            res.json({ message: 'logged out' })
         }
+
+        res.clearCookie('accessToken', cookieOption())
+        res.clearCookie('refreshToken', cookieOption())
+        res.json({ message: 'logged out' })
     } catch (error) {
         res.status(500).json({ message: 'log out failed' })
     }
@@ -417,3 +425,4 @@ exports.resetpassword = async (req, res) => {
         res.status(500).json({ message: 'Reset failed' })
     }
 }
+
