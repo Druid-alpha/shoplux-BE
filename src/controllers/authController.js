@@ -2,7 +2,7 @@ const User = require('../../models/user')
 const { z } = require('zod')
 const bcrypt = require('bcryptjs')
 const sendEmail = require('../utils/sendEmail')
-const { verifyRefreshToken, signAccessToken, signRefreshToken } = require('../config/tokenService')
+const { verifyRefreshToken, verifyAccessToken, signAccessToken, signRefreshToken } = require('../config/tokenService')
 const cookieOption = require('../utils/cookieOptions')
 const handleZodError = require('../utils/handleZodError')
 const crypto = require('crypto')
@@ -298,24 +298,39 @@ exports.refresh = async (req, res) => {
 exports.logOut = async (req, res) => {
     try {
         const currRefreshToken = req.cookies?.refreshToken || req.body?.refreshToken
+        const authHeader = req.headers.authorization || ''
+        const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : null
+        let user = null
 
         if (currRefreshToken) {
             try {
                 const decoded = verifyRefreshToken(currRefreshToken)
-                const user = await User.findById(decoded.id)
-                if (user) {
-                    user.refreshTokens = user.refreshTokens.map(rt =>
-                        rt.token === currRefreshToken
-                            ? { ...rt.toObject(), revoked: true }
-                            : rt
-                    )
-                    user.isOnline = false
-                    user.lastLoggedOutAt = new Date()
-                    await user.save()
-                }
+                user = await User.findById(decoded.id)
             } catch (error) {
                 // ignore invalid refresh token; continue logout response
             }
+        }
+
+        if (!user && bearerToken) {
+            try {
+                const decodedAccess = verifyAccessToken(bearerToken)
+                user = await User.findById(decodedAccess.id)
+            } catch (error) {
+                // ignore invalid access token; continue logout response
+            }
+        }
+
+        if (user) {
+            if (currRefreshToken) {
+                user.refreshTokens = user.refreshTokens.map(rt =>
+                    rt.token === currRefreshToken
+                        ? { ...rt.toObject(), revoked: true }
+                        : rt
+                )
+            }
+            user.isOnline = false
+            user.lastLoggedOutAt = new Date()
+            await user.save()
         }
 
         res.clearCookie('accessToken', cookieOption())
