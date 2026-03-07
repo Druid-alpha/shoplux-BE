@@ -10,7 +10,8 @@ const refreshTokenSchema = new mongoose.Schema({
 const cartItemSchema = new mongoose.Schema({
   product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
   qty: { type: Number, default: 1 },
-  variant: { type: Object, default: {} }
+  variant: { type: Object, default: {} },
+  addedAt: { type: Date, default: Date.now }
 })
 cartItemSchema.index({ product: 1, 'variant.color': 1, 'variant.size': 1 })
 
@@ -37,6 +38,7 @@ const userSchema = new mongoose.Schema({
 }, { timestamps: true })
 
 module.exports = mongoose.model('User', userSchema)
+
 
 
 

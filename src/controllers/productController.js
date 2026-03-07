@@ -1,4 +1,4 @@
-﻿const mongoose = require('mongoose')
+const mongoose = require('mongoose')
 const { z } = require('zod')
 const cloudinary = require('../config/cloudinary') // adjust the path
 
@@ -38,7 +38,18 @@ const normalizeVariants = (variants = []) =>
     image: v.image?.url && v.image?.public_id ? v.image : null
   }))
 
-const CLOTHING_TYPES = ['clothes', 'shoes', 'bags', 'eyeglass']
+const CLOTHING_TYPES = ['clothes', 'shoes', 'bags', 'bag', 'eyeglass']
+
+const canonicalClothingType = (value) => {
+  if (!value) return null
+  const v = String(value).toLowerCase()
+  return v === 'bag' ? 'bags' : v
+}
+
+const clothingTypeFilter = (value) => {
+  if (!value) return null
+  return value === 'bags' ? { $in: ['bags', 'bag'] } : value
+}
 
 const parseObjectIdList = (value) => {
   if (!value) return []
@@ -95,14 +106,14 @@ const buildQueryFromReq = async (req, { admin = false } = {}) => {
   // Clothing type (allowed only for clothing category)
   const clothingType =
     req.query.clothingType && req.query.clothingType !== 'all'
-      ? String(req.query.clothingType).toLowerCase()
+      ? canonicalClothingType(req.query.clothingType)
       : null
   const isClothingCategory = category?.name?.toLowerCase() === 'clothing'
   if (clothingType) {
     if (!isClothingCategory || !CLOTHING_TYPES.includes(clothingType)) {
       andConditions.push({ _id: { $in: [] } })
     } else {
-      andConditions.push({ clothingType })
+      andConditions.push({ clothingType: clothingTypeFilter(clothingType) })
     }
   }
 
@@ -279,7 +290,7 @@ exports.getFilterOptions = async (req, res) => {
     const category = await resolveCategory(req.query.category)
     const isClothingCategory = category?.name?.toLowerCase() === 'clothing'
     const clothingType = req.query.clothingType && req.query.clothingType !== 'all'
-      ? String(req.query.clothingType).toLowerCase()
+      ? canonicalClothingType(req.query.clothingType)
       : null
     const selectedBrandIds = parseObjectIdList(req.query.brand)
     const selectedColorIds = parseObjectIdList(req.query.color)
@@ -287,7 +298,7 @@ exports.getFilterOptions = async (req, res) => {
     const baseFilter = { isDeleted: false }
     if (category) baseFilter.category = category._id
     if (clothingType && isClothingCategory && CLOTHING_TYPES.includes(clothingType)) {
-      baseFilter.clothingType = clothingType
+      baseFilter.clothingType = clothingTypeFilter(clothingType)
     }
 
     if (clothingType && (!isClothingCategory || !CLOTHING_TYPES.includes(clothingType))) {
@@ -330,7 +341,7 @@ exports.getFilterOptions = async (req, res) => {
       Color.find({ _id: { $in: combinedColorIds } }).select('_id name hex')
     ])
 
-    const clothingTypes = isClothingCategory ? CLOTHING_TYPES : []
+    const clothingTypes = isClothingCategory ? ['clothes', 'shoes', 'bags', 'eyeglass'] : []
     const availability = [
       { label: 'In Stock', value: 'in_stock' },
       { label: 'Out of Stock', value: 'out_of_stock' }
@@ -1225,4 +1236,5 @@ exports.hardDeleteAllProducts = async (req, res) => {
     res.status(500).json({ message: 'Failed to hard delete products' })
   }
 }
+
 

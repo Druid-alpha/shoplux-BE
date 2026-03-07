@@ -61,7 +61,8 @@ exports.addToCart = async (req, res) => {
       user.cart.push({
         product: productId,
         qty: Math.min(stockLimit, Math.max(1, Number(qty))),
-        variant: variant ? { sku: String(variant) } : {} // Store as object even if empty
+        variant: variant ? { sku: String(variant) } : {},
+        addedAt: new Date()
       });
     }
 
@@ -196,7 +197,8 @@ exports.syncCart = async (req, res) => {
         user.cart.push({
           product: productId,
           qty: Math.min(stockLimit, Math.max(1, qty)),
-          variant: variant ? { sku: String(variant) } : {}
+          variant: variant ? { sku: String(variant) } : {},
+          addedAt: new Date()
         })
       }
     }
@@ -211,3 +213,4 @@ exports.syncCart = async (req, res) => {
     res.status(500).json({ message: 'Cart sync failed' })
   }
 }
+
