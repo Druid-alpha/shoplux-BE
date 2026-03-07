@@ -40,6 +40,13 @@ const normalizeVariants = (variants = []) =>
 
 const CLOTHING_TYPES = ['clothes', 'shoes', 'bags', 'bag', 'eyeglass']
 
+const FEATURED_CACHE_TTL_MS = 60 * 1000
+let featuredCache = { data: [], updatedAt: 0 }
+const invalidateFeaturedCache = () => {
+  featuredCache = { data: [], updatedAt: 0 }
+}
+
+
 const canonicalClothingType = (value) => {
   if (!value) return null
   const v = String(value).toLowerCase()
@@ -466,6 +473,7 @@ exports.createFeatured = async (req, res) => {
 
     product.featured = featured
     await product.save()
+    invalidateFeaturedCache()
 
     res.json({
       message: featured
@@ -486,26 +494,45 @@ exports.createFeatured = async (req, res) => {
 
 exports.getFeatured = async (req, res) => {
   try {
+    const limit = Math.min(24, Math.max(1, Number(req.query.limit || 12)))
+    const now = Date.now()
+
+    // Return warm cache quickly under refresh storms.
+    if (featuredCache.data.length > 0 && (now - featuredCache.updatedAt) < FEATURED_CACHE_TTL_MS) {
+      return res.json({ products: featuredCache.data.slice(0, limit), cached: true })
+    }
+
     let products = await Product.find({
       isDeleted: false,
       featured: true
     })
       .populate('brand category variants.options.color color')
-      .limit(12)
       .sort({ createdAt: -1 })
+      .limit(limit)
 
-    // FALLBACK: If no featured products, fetch latest 12
     if (!products.length) {
       products = await Product.find({ isDeleted: false })
         .populate('brand category variants.options.color color')
-        .limit(12)
         .sort({ createdAt: -1 })
+        .limit(limit)
     }
 
-    res.json({ products })
+    if (products.length > 0) {
+      featuredCache = {
+        data: products,
+        updatedAt: Date.now()
+      }
+    }
+
+    return res.json({ products })
   } catch (err) {
     console.error(err)
-    res.status(500).json({ message: 'Failed to fetch featured products' })
+
+    if (featuredCache.data.length > 0) {
+      return res.json({ products: featuredCache.data.slice(0, 12), stale: true })
+    }
+
+    return res.status(500).json({ message: 'Failed to fetch featured products' })
   }
 }
 
@@ -1236,6 +1263,8 @@ exports.hardDeleteAllProducts = async (req, res) => {
     res.status(500).json({ message: 'Failed to hard delete products' })
   }
 }
+
+
 
 
 
