@@ -72,7 +72,26 @@ exports.updateAvatar = async (req, res) => {
 // Get all users (admin only)
 exports.getUsers = async (req, res) => {
   try {
-    const users = await User.find({ isDeleted: { $ne: true } }).select('-password -refreshTokens')
+    const { sortBy, sort } = req.query
+
+    let sortField = 'createdAt'
+    let sortOrder = -1
+
+    if (sortBy === 'created-1' || sort === 'created-1') {
+      sortField = 'createdAt'
+      sortOrder = -1
+    } else if (sortBy === 'created1' || sort === 'created1') {
+      sortField = 'createdAt'
+      sortOrder = 1
+    } else if (sortBy === 'joined' || sort === 'joined') {
+      sortField = 'createdAt'
+      sortOrder = -1
+    }
+
+    const users = await User.find({ isDeleted: { $ne: true } })
+      .select('-password -refreshTokens')
+      .sort({ [sortField]: sortOrder })
+
     res.json({ users })
   } catch (error) {
     console.error(error)
@@ -126,3 +145,4 @@ exports.adminDeleteUser = async (req, res) => {
     res.status(500).json({ message: 'Delete failed' })
   }
 }
+

@@ -28,11 +28,13 @@ const userSchema = new mongoose.Schema({
   resetToken: String,
   resetTokenExpires: Date,
   avatar: { type: String, default: '' },
+  lastSignedIn: { type: Date, default: null },
   refreshTokens: [refreshTokenSchema],
   cart: [cartItemSchema],
   isDeleted: { type: Boolean, default: false }
 }, { timestamps: true })
 
 module.exports = mongoose.model('User', userSchema)
+
 
 

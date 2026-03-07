@@ -225,6 +225,7 @@ exports.login = async (req, res) => {
         const accessToken = signAccessToken({ id: user._id, role: user.role })
         const refreshToken = signRefreshToken({ id: user._id })
         user.refreshTokens.push({ token: refreshToken })
+        user.lastSignedIn = new Date()
         await user.save()
         res.cookie('accessToken', accessToken, cookieOption(1 * 60 * 60 * 1000))
         res.cookie('refreshToken', refreshToken, cookieOption(7 * 24 * 60 * 60 * 1000))
