@@ -281,6 +281,8 @@ exports.refresh = async (req, res) => {
             { new: true }
         )
         if (!user) return res.status(401).json({ message: 'refresh tokens revoked ,reused or invalid ' })
+        user.isOnline = true
+        await user.save()
         const newAccessToken = signAccessToken({ id: user._id, role: user.role })
         res.cookie('accessToken', newAccessToken, cookieOption(15 * 60 * 1000))
         res.cookie('refreshToken', newRefreshToken, cookieOption(7 * 24 * 60 * 60 * 1000))
@@ -335,6 +337,10 @@ exports.me = async (req, res) => {
         const decoded = require('../config/tokenService').verifyAccessToken(token)
         const user = await User.findById(decoded.id).select('-password -refreshTokens')
         if (!user) return res.status(401).json({ message: 'invalid token user' })
+        if (!user.isOnline) {
+            user.isOnline = true
+            await user.save()
+        }
         res.json({ user })
     } catch (error) {
         res.status(401).json({ message: 'invalid token' })
@@ -425,4 +431,6 @@ exports.resetpassword = async (req, res) => {
         res.status(500).json({ message: 'Reset failed' })
     }
 }
+
+
 
