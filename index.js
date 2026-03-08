@@ -9,6 +9,7 @@ const morgan = require('morgan')
 
 const bcrypt = require('bcryptjs')
 const User = require('./models/user')
+const { startInvoiceCleanupJob } = require('./src/jobs/invoiceCleanupJob')
 
 const app = express()
 
@@ -122,6 +123,7 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 5000
 
 connectDB().then(() => {
+  startInvoiceCleanupJob()
   app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`)
   })
