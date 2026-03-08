@@ -102,8 +102,17 @@ const buildQueryFromReq = async (req, { admin = false } = {}) => {
   }
 
   // Category (ID or name)
-  const category = await resolveCategory(req.query.category)
-  if (req.query.category && req.query.category !== 'all' && !category) {
+  const categoryParam = req.query.category
+  let category = null
+  if (categoryParam && categoryParam !== 'all') {
+    if (admin && isValidObjectId(categoryParam)) {
+      // Admin filters send category id already; avoid extra category lookup per request.
+      category = { _id: toObjectId(categoryParam), name: null }
+    } else {
+      category = await resolveCategory(categoryParam)
+    }
+  }
+  if (categoryParam && categoryParam !== 'all' && !category) {
     andConditions.push({ _id: { $in: [] } })
   }
   if (category) {
@@ -117,7 +126,9 @@ const buildQueryFromReq = async (req, { admin = false } = {}) => {
       : null
   const isClothingCategory = category?.name?.toLowerCase() === 'clothing'
   if (clothingType) {
-    if (!isClothingCategory || !CLOTHING_TYPES.includes(clothingType)) {
+    if (!CLOTHING_TYPES.includes(clothingType)) {
+      andConditions.push({ _id: { $in: [] } })
+    } else if (!admin && !isClothingCategory) {
       andConditions.push({ _id: { $in: [] } })
     } else {
       andConditions.push({ clothingType: clothingTypeFilter(clothingType) })
@@ -584,16 +595,18 @@ exports.adminListProducts = async (req, res) => {
     const page = Math.max(1, Number(req.query.page || 1))
     const limit = Math.min(200, Number(req.query.limit || 50))
     const query = await buildQueryFromReq(req, { admin: true })
-    const total = await Product.countDocuments(query)
-    const products = await Product.find(query)
-      // Keep admin list fast: return only fields needed by the table.
-      .select('_id title price featured isDeleted images category brand variants createdAt')
-      .populate('brand', 'name')
-      .populate('category', 'name')
-      .skip((page - 1) * limit)
-      .limit(limit)
-      .sort({ createdAt: -1 })
-      .lean()
+    const [total, products] = await Promise.all([
+      Product.countDocuments(query),
+      Product.find(query)
+        // Keep admin list fast: return only fields needed by the table.
+        .select('_id title price featured isDeleted images category brand variants createdAt')
+        .populate('brand', 'name')
+        .populate('category', 'name')
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .sort({ createdAt: -1 })
+        .lean()
+    ])
 
     res.json({
       products,

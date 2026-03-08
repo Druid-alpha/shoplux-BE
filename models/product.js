@@ -132,6 +132,8 @@ productSchema.index({ isDeleted: 1, createdAt: -1 })
 productSchema.index({ isDeleted: 1, category: 1, createdAt: -1 })
 productSchema.index({ isDeleted: 1, brand: 1, createdAt: -1 })
 productSchema.index({ isDeleted: 1, color: 1, createdAt: -1 })
+productSchema.index({ isDeleted: 1, clothingType: 1, createdAt: -1 })
+productSchema.index({ 'variants.options.color': 1 })
 productSchema.index({ isDeleted: 1, featured: 1, createdAt: -1 })
 productSchema.index({ sku: 1 })
 
