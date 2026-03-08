@@ -11,18 +11,6 @@ const PDFDocument = require('pdfkit')
 const cloudinary = require('../config/cloudinary')
 const sendEmail = require('../utils/sendEmail')
 
-function buildSignedInvoiceUrl(orderId, version) {
-  return cloudinary.url(`invoices/invoice-${orderId}`, {
-    resource_type: 'raw',
-    type: 'upload',
-    format: 'pdf',
-    secure: true,
-    sign_url: true,
-    flags: 'attachment',
-    ...(version ? { version } : {})
-  })
-}
-
 
 /* ================================================================
    INIT — Create Paystack transaction for a pending order
@@ -390,7 +378,8 @@ async function generateInvoice(order) {
     public_id: `invoice-${order._id}`
   })
 
-  order.invoiceUrl = buildSignedInvoiceUrl(order._id, uploaded.version)
+  // Keep original Cloudinary raw file URL to avoid transformation authorization issues.
+  order.invoiceUrl = uploaded.secure_url
   await order.save()
 
   if (fs.existsSync(tmpPath)) fs.unlink(tmpPath, () => { })

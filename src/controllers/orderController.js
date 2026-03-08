@@ -7,14 +7,12 @@ const os = require('os')
 const PDFDocument = require('pdfkit')
 const cloudinary = require('../config/cloudinary')
 
-function buildSignedInvoiceUrl(orderId, version) {
+function buildPublicInvoiceUrl(orderId, version) {
   return cloudinary.url(`invoices/invoice-${orderId}`, {
     resource_type: 'raw',
     type: 'upload',
     format: 'pdf',
     secure: true,
-    sign_url: true,
-    flags: 'attachment',
     ...(version ? { version } : {})
   })
 }
@@ -230,9 +228,9 @@ exports.generateOrderInvoice = async (req, res) => {
     }
 
     if (order.invoiceUrl) {
-      // Normalize legacy unsigned attachment URLs that can 401 on strict Cloudinary setups.
-      if (order.invoiceUrl.includes('/raw/upload/fl_attachment/') && !order.invoiceUrl.includes('/s--')) {
-        order.invoiceUrl = buildSignedInvoiceUrl(order._id)
+      // Normalize older attachment/signed delivery URLs to stable public raw URL.
+      if (order.invoiceUrl.includes('/fl_attachment/') || order.invoiceUrl.includes('/s--')) {
+        order.invoiceUrl = buildPublicInvoiceUrl(order._id)
         await order.save()
       }
       return res.json({ invoiceUrl: order.invoiceUrl, generated: false })
@@ -322,7 +320,8 @@ async function generateInvoiceForOrder(order) {
     public_id: `invoice-${order._id}`
   })
 
-  order.invoiceUrl = buildSignedInvoiceUrl(order._id, uploaded.version)
+  // Keep original Cloudinary raw file URL to avoid transformation authorization issues.
+  order.invoiceUrl = uploaded.secure_url
   await order.save()
 
   if (fs.existsSync(tmpPath)) fs.unlink(tmpPath, () => {})
