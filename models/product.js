@@ -127,6 +127,14 @@ const productSchema = new mongoose.Schema(
   { timestamps: true }
 )
 
+// Query indexes for admin/shop filtering and sorting paths.
+productSchema.index({ isDeleted: 1, createdAt: -1 })
+productSchema.index({ isDeleted: 1, category: 1, createdAt: -1 })
+productSchema.index({ isDeleted: 1, brand: 1, createdAt: -1 })
+productSchema.index({ isDeleted: 1, color: 1, createdAt: -1 })
+productSchema.index({ isDeleted: 1, featured: 1, createdAt: -1 })
+productSchema.index({ sku: 1 })
+
 /* ================= AUTO SYNC (SAFE) ================= */
 productSchema.pre('save', function (next) {
   if (Array.isArray(this.variants) && this.variants.length > 0) {

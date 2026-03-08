@@ -586,10 +586,14 @@ exports.adminListProducts = async (req, res) => {
     const query = await buildQueryFromReq(req, { admin: true })
     const total = await Product.countDocuments(query)
     const products = await Product.find(query)
-      .populate('brand category variants.options.color color createdBy', 'name email')
+      // Keep admin list fast: return only fields needed by the table.
+      .select('_id title price featured isDeleted images category brand variants createdAt')
+      .populate('brand', 'name')
+      .populate('category', 'name')
       .skip((page - 1) * limit)
       .limit(limit)
       .sort({ createdAt: -1 })
+      .lean()
 
     res.json({
       products,
