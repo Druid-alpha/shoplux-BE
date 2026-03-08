@@ -273,11 +273,11 @@ exports.paystackWebHook = async (req, res) => {
     generateInvoice(order).catch(err => console.error('Webhook PDF failed:', err.message))
 
     try {
-      await sendEmail(
-        order.user.email,
-        "Payment Successful - ShopLuxe",
-        `Your payment for order #${order._id} was successful. Thank you for shopping with ShopLuxe!\n\nShipping to: ${order.shippingAddress?.fullName || 'N/A'}, ${order.shippingAddress?.address || ''}, ${order.shippingAddress?.city || ''}, ${order.shippingAddress?.state || ''}.`
-      )
+      await sendEmail({
+        to: order.user.email,
+        subject: 'Payment Successful - ShopLuxe',
+        text: `Your payment for order #${order._id} was successful. Thank you for shopping with ShopLuxe!\n\nShipping to: ${order.shippingAddress?.fullName || 'N/A'}, ${order.shippingAddress?.address || ''}, ${order.shippingAddress?.city || ''}, ${order.shippingAddress?.state || ''}.`
+      })
     } catch (e) { console.error('Email failed:', e.message) }
 
     res.sendStatus(200)
@@ -378,7 +378,8 @@ async function generateInvoice(order) {
     public_id: `invoice-${order._id}`
   })
 
-  order.invoiceUrl = uploaded.secure_url + '?fl_attachment=true'
+  // Force file download with Cloudinary transformation path for raw assets.
+  order.invoiceUrl = uploaded.secure_url.replace('/upload/', '/upload/fl_attachment/')
   await order.save()
 
   if (fs.existsSync(tmpPath)) fs.unlink(tmpPath, () => { })

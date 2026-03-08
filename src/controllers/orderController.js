@@ -305,7 +305,8 @@ async function generateInvoiceForOrder(order) {
     public_id: `invoice-${order._id}`
   })
 
-  order.invoiceUrl = uploaded.secure_url + '?fl_attachment=true'
+  // Force file download with Cloudinary transformation path for raw assets.
+  order.invoiceUrl = uploaded.secure_url.replace('/upload/', '/upload/fl_attachment/')
   await order.save()
 
   if (fs.existsSync(tmpPath)) fs.unlink(tmpPath, () => {})
