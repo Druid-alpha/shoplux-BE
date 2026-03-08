@@ -776,6 +776,7 @@ exports.createProduct = async (req, res) => {
       product.price = Math.min(...product.variants.map(v => v.price))
       await product.save()
     }
+    invalidateFeaturedCache()
 
     res.status(201).json({ product })
   } catch (err) {
@@ -978,6 +979,7 @@ exports.updateProduct = async (req, res) => {
     }
 
     await product.save()
+    invalidateFeaturedCache()
 
     res.json({ product })
   } catch (err) {
@@ -1054,6 +1056,7 @@ exports.updateVariants = async (req, res) => {
     product.price = Math.min(...product.variants.map(v => v.price))
 
     await product.save()
+    invalidateFeaturedCache()
 
     res.json({ message: 'Variants updated', product })
   } catch (err) {
@@ -1109,6 +1112,7 @@ exports.deleteProduct = async (req, res) => {
     // Soft delete the product
     product.isDeleted = true
     await product.save()
+    invalidateFeaturedCache()
 
     res.json({ message: 'Product deleted and images cleared from Cloudinary' })
   } catch (err) {
@@ -1162,6 +1166,7 @@ exports.hardDeleteProduct = async (req, res) => {
     }
 
     await product.deleteOne() // hard delete
+    invalidateFeaturedCache()
     res.json({ message: 'Product permanently deleted' })
   } catch (err) {
     console.error(err)
@@ -1190,6 +1195,7 @@ exports.restoreProduct = async (req, res) => {
 
     product.isDeleted = false
     await product.save()
+    invalidateFeaturedCache()
 
     res.json({ message: 'Product restored successfully', product })
   } catch (err) {
@@ -1204,6 +1210,7 @@ exports.restoreAllProducts = async (req, res) => {
       { isDeleted: true },
       { $set: { isDeleted: false } }
     )
+    if (result.modifiedCount > 0) invalidateFeaturedCache()
 
     res.json({
       message: `${result.modifiedCount} product(s) restored`,
@@ -1256,6 +1263,7 @@ exports.hardDeleteAllProducts = async (req, res) => {
 
     // Remove products from DB
     const result = await Product.deleteMany({ isDeleted: true })
+    if (result.deletedCount > 0) invalidateFeaturedCache()
 
     res.json({ message: `${result.deletedCount} product(s) permanently deleted` })
   } catch (err) {
