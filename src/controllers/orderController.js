@@ -11,6 +11,7 @@ function buildSignedInvoiceUrl(orderId, version) {
   return cloudinary.url(`invoices/invoice-${orderId}`, {
     resource_type: 'raw',
     type: 'upload',
+    format: 'pdf',
     secure: true,
     sign_url: true,
     flags: 'attachment',
