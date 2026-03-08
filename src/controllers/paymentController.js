@@ -3,6 +3,7 @@ const mongoose = require('mongoose')
 const Order = require('../../models/order')
 const path = require('path')
 const fs = require('fs')
+const os = require('os')
 const Product = require('../../models/product')
 const User = require('../../models/user')
 const paystack = require('../config/paystack')
@@ -295,7 +296,7 @@ exports.paystackWebHook = async (req, res) => {
 ================================================================ */
 async function generateInvoice(order) {
   const invoiceName = `invoice-${order._id}.pdf`
-  const tmpPath = path.join('/tmp', invoiceName)
+  const tmpPath = path.join(os.tmpdir(), invoiceName)
 
   const doc = new PDFDocument({ margin: 50 })
   const stream = fs.createWriteStream(tmpPath)

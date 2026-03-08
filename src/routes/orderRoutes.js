@@ -4,6 +4,7 @@ const orderCtrl = require('../controllers/orderController')
 
 router.use(auth)
 router.get('/my', orderCtrl.getMyOrder)
+router.post('/:id/invoice', orderCtrl.generateOrderInvoice)
 router.get('/:id', orderCtrl.getOrderId)
 router.get('/', orderCtrl.getAllOrders)
 router.post('/', orderCtrl.createOrder)

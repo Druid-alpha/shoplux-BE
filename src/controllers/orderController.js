@@ -1,6 +1,11 @@
 const Order = require('../../models/order')
 const User = require('../../models/user')
 const Product = require('../../models/product')
+const path = require('path')
+const fs = require('fs')
+const os = require('os')
+const PDFDocument = require('pdfkit')
+const cloudinary = require('../config/cloudinary')
 
 
 exports.createOrder = async (req, res) => {
@@ -195,4 +200,115 @@ exports.deleteOrder = async (req, res) => {
     console.error('Delete order error:', error)
     res.status(500).json({ message: 'Server error deleting order' })
   }
+}
+
+exports.generateOrderInvoice = async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id).populate('user', 'email name')
+    if (!order) return res.status(404).json({ message: 'Order not found' })
+
+    const isAdmin = req.user.role === 'admin'
+    const isOwner = String(order.user?._id || order.user) === String(req.user.id)
+    if (!isOwner && !isAdmin) {
+      return res.status(403).json({ message: 'Access denied' })
+    }
+
+    if (order.paymentStatus !== 'paid') {
+      return res.status(400).json({ message: 'Invoice is available after successful payment' })
+    }
+
+    if (order.invoiceUrl) {
+      return res.json({ invoiceUrl: order.invoiceUrl, generated: false })
+    }
+
+    const invoiceUrl = await generateInvoiceForOrder(order)
+    return res.json({ invoiceUrl, generated: true })
+  } catch (error) {
+    console.error('Generate invoice error:', error)
+    res.status(500).json({ message: 'Failed to generate invoice' })
+  }
+}
+
+async function generateInvoiceForOrder(order) {
+  const invoiceName = `invoice-${order._id}.pdf`
+  const tmpPath = path.join(os.tmpdir(), invoiceName)
+
+  const doc = new PDFDocument({ margin: 50 })
+  const stream = fs.createWriteStream(tmpPath)
+  doc.pipe(stream)
+
+  doc.fontSize(22).font('Helvetica-Bold').text('SHOPLUXE', { align: 'center' })
+  doc.fontSize(10).font('Helvetica').text('Zone 7, Ota-Efun Osogbo, Osun, Nigeria', { align: 'center' })
+  doc.text('support@shopluxe.com', { align: 'center' })
+  doc.moveDown(1.5)
+  doc.fontSize(18).font('Helvetica-Bold').text('OFFICIAL INVOICE', { align: 'center' })
+  doc.moveDown()
+
+  doc.fontSize(11).font('Helvetica')
+  doc.text(`Invoice No: ${order._id}`)
+  doc.text(`Date: ${new Date(order.createdAt || Date.now()).toLocaleDateString('en-US', { dateStyle: 'full' })}`)
+  doc.text(`Payment Status: ${order.paymentStatus?.toUpperCase() || 'PAID'}`)
+  doc.moveDown()
+
+  const addr = order.shippingAddress
+  if (addr?.fullName) {
+    doc.font('Helvetica-Bold').text('Billed To:')
+    doc.font('Helvetica')
+    doc.text(addr.fullName)
+    if (addr.phone) doc.text(`Phone: ${addr.phone}`)
+    if (addr.address) doc.text(addr.address)
+    if (addr.city || addr.state) doc.text(`${addr.city || ''}${addr.city && addr.state ? ', ' : ''}${addr.state || ''}`)
+    doc.text('Nigeria')
+    doc.moveDown()
+  }
+
+  doc.font('Helvetica-Bold')
+  doc.text('ITEMS', { underline: true })
+  doc.moveDown(0.5)
+  doc.font('Helvetica')
+  doc.text('------------------------------------------------------------------')
+
+  order.items.forEach((item, i) => {
+    const variantInfo = item.variant?.sku ? ` [${item.variant.sku}]` : ''
+    const itemName = item.title || 'Product'
+    const lineTotal = (item.priceAtPurchase || 0) * item.qty
+    doc.font('Helvetica-Bold').text(`${i + 1}. ${itemName}${variantInfo}`)
+    doc.font('Helvetica').text(
+      `   Qty: ${item.qty}  x  N${(item.priceAtPurchase || 0).toLocaleString()}  =  N${lineTotal.toLocaleString()}`,
+      { indent: 10 }
+    )
+    doc.moveDown(0.3)
+  })
+
+  doc.text('------------------------------------------------------------------')
+  doc.moveDown()
+  doc.fontSize(14).font('Helvetica-Bold').text(
+    `TOTAL PAID: N${(order.totalAmount || 0).toLocaleString()}`,
+    { align: 'right' }
+  )
+  doc.moveDown(2)
+  doc.fontSize(9).font('Helvetica').text(
+    'Thank you for shopping with ShopLuxe. We appreciate your business!',
+    { align: 'center' }
+  )
+
+  doc.end()
+
+  await new Promise((resolve, reject) => {
+    stream.on('finish', resolve)
+    stream.on('error', reject)
+  })
+
+  const uploaded = await cloudinary.uploader.upload(tmpPath, {
+    folder: 'invoices',
+    resource_type: 'raw',
+    public_id: `invoice-${order._id}`
+  })
+
+  order.invoiceUrl = uploaded.secure_url + '?fl_attachment=true'
+  await order.save()
+
+  if (fs.existsSync(tmpPath)) fs.unlink(tmpPath, () => {})
+
+  return order.invoiceUrl
 }
