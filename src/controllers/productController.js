@@ -91,6 +91,23 @@ const getSizeOptionsForSelection = (isClothingCategory, clothingType) => {
   return []
 }
 
+const sanitizeSizes = (sizes = []) => {
+  if (!Array.isArray(sizes)) return []
+  return [...new Set(
+    sizes
+      .map(s => String(s || '').trim())
+      .filter(Boolean)
+  )]
+}
+
+const validateSizesByType = (clothingType, sizes = []) => {
+  const normalizedType = canonicalClothingType(clothingType)
+  if (!normalizedType || !sizes.length) return true
+  const allowed = getSizeOptionsForSelection(true, normalizedType)
+  if (!allowed.length) return true
+  return sizes.every(s => allowed.includes(String(s)))
+}
+
 const parseObjectIdList = (value) => {
   if (!value) return []
   return String(value)
@@ -301,6 +318,7 @@ const createSchema = z.object({
   discount: z.coerce.number().min(0).optional(),
   featured: z.boolean().optional(),
   clothingType: z.enum(['clothes', 'shoes', 'bags', 'eyeglass']).optional(),
+  sizes: z.array(z.string()).optional(),
   variants: z.array(variantSchema).optional(),
   images: z.array(z.object({
     url: z.string(),
@@ -683,6 +701,10 @@ exports.createProduct = async (req, res) => {
       typeof rawPayload.variants === 'string'
         ? JSON.parse(rawPayload.variants)
         : rawPayload.variants || []
+    const parsedSizes =
+      typeof rawPayload.sizes === 'string'
+        ? JSON.parse(rawPayload.sizes)
+        : rawPayload.sizes || []
 
     const data = createSchema.parse({
       ...rawPayload,
@@ -703,6 +725,7 @@ exports.createProduct = async (req, res) => {
           ? rawPayload.tags
           : rawPayload.tags.split(',').map(t => t.trim())
         : [],
+      sizes: sanitizeSizes(parsedSizes),
       variants: parsedVariants,
     })
 
@@ -732,6 +755,9 @@ exports.createProduct = async (req, res) => {
       if (data.variants?.some(v => v.options?.size && !EYEGLASS_SIZES.includes(String(v.options.size)))) {
         return res.status(400).json({ message: 'Invalid eyeglass size' })
       }
+    }
+    if (!validateSizesByType(data.clothingType, data.sizes)) {
+      return res.status(400).json({ message: 'Invalid main product sizes' })
     }
 
     if (data.clothingType) {
@@ -832,6 +858,7 @@ exports.createProduct = async (req, res) => {
       brand: data.brand ? toObjectId(data.brand) : null,
       color: data.color ? toObjectId(data.color) : null,
       clothingType: data.clothingType || null,
+      sizes: sanitizeSizes(data.sizes),
       tags: data.tags,
       discount: data.discount,
       isDeleted: false,
@@ -942,6 +969,9 @@ exports.updateProduct = async (req, res) => {
         return res.status(400).json({ message: 'Invalid eyeglass size' })
       }
     }
+    if (data.sizes && !validateSizesByType(effectiveClothingType, data.sizes)) {
+      return res.status(400).json({ message: 'Invalid main product sizes' })
+    }
 
     if (data.brand && mongoose.isValidObjectId(data.brand)) {
       update.$set.brand = data.brand
@@ -956,6 +986,9 @@ exports.updateProduct = async (req, res) => {
     }
     if (data.clothingType) {
       update.$set.clothingType = data.clothingType
+    }
+    if (data.sizes) {
+      update.$set.sizes = sanitizeSizes(data.sizes)
     }
 
     /* =======================
