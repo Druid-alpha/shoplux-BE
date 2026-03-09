@@ -1,6 +1,6 @@
 // updateClothingType.js
 const mongoose = require('mongoose')
-const Product = require('./models/Product')
+const Product = require('./models/product')
 const Category = require('./models/Category')
 require('dotenv').config()
 

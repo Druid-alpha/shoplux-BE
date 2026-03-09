@@ -40,6 +40,10 @@ const normalizeVariants = (variants = []) =>
   }))
 
 const CLOTHING_TYPES = ['clothes', 'shoes', 'bags', 'bag', 'eyeglass']
+const CLOTHES_SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL']
+const SHOE_SIZES = ['36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46']
+const BAG_SIZES = ['Small', 'Medium', 'Large']
+const EYEGLASS_SIZES = ['One Size']
 
 const FEATURED_CACHE_TTL_MS = 60 * 1000
 let featuredCache = { data: [], updatedAt: 0 }
@@ -57,6 +61,34 @@ const canonicalClothingType = (value) => {
 const clothingTypeFilter = (value) => {
   if (!value) return null
   return value === 'bags' ? { $in: ['bags', 'bag'] } : value
+}
+
+const getSizeOptionsByClothingType = (isClothingCategory) => {
+  if (!isClothingCategory) {
+    return {
+      clothes: [],
+      shoes: [],
+      bags: [],
+      eyeglass: []
+    }
+  }
+
+  return {
+    clothes: CLOTHES_SIZES,
+    shoes: SHOE_SIZES,
+    bags: BAG_SIZES,
+    eyeglass: EYEGLASS_SIZES
+  }
+}
+
+const getSizeOptionsForSelection = (isClothingCategory, clothingType) => {
+  if (!isClothingCategory) return []
+  if (!clothingType) return CLOTHES_SIZES
+  if (clothingType === 'shoes') return SHOE_SIZES
+  if (clothingType === 'clothes') return CLOTHES_SIZES
+  if (clothingType === 'bags' || clothingType === 'bag') return BAG_SIZES
+  if (clothingType === 'eyeglass') return EYEGLASS_SIZES
+  return []
 }
 
 const parseObjectIdList = (value) => {
@@ -326,6 +358,13 @@ exports.getFilterOptions = async (req, res) => {
         categories,
         brands: [],
         clothingTypes: [],
+        sizeOptions: [],
+        sizeOptionsByClothingType: {
+          clothes: [],
+          shoes: [],
+          bags: [],
+          eyeglass: []
+        },
         colors: [],
         availability: [
           { label: 'In Stock', value: 'in_stock' },
@@ -362,6 +401,8 @@ exports.getFilterOptions = async (req, res) => {
     ])
 
     const clothingTypes = isClothingCategory ? ['clothes', 'shoes', 'bags', 'eyeglass'] : []
+    const sizeOptionsByClothingType = getSizeOptionsByClothingType(isClothingCategory)
+    const sizeOptions = getSizeOptionsForSelection(isClothingCategory, clothingType)
     const availability = [
       { label: 'In Stock', value: 'in_stock' },
       { label: 'Out of Stock', value: 'out_of_stock' }
@@ -381,6 +422,8 @@ exports.getFilterOptions = async (req, res) => {
       categories,
       brands,
       clothingTypes,
+      sizeOptions,
+      sizeOptionsByClothingType,
       colors,
       availability,
       message: matchedProducts === 0 ? 'No products found for the selected filters' : undefined
@@ -670,15 +713,24 @@ exports.createProduct = async (req, res) => {
     }
 
     if (data.clothingType === 'shoes') {
-      if (data.variants?.some(v => isNaN(Number(v.options?.size)))) {
-        return res.status(400).json({ message: 'Shoe sizes must be numbers' })
+      if (data.variants?.some(v => v.options?.size && !SHOE_SIZES.includes(String(v.options.size)))) {
+        return res.status(400).json({ message: 'Invalid shoe size' })
       }
     }
 
     if (data.clothingType === 'clothes') {
-      const allowed = ['XS', 'S', 'M', 'L', 'XL', 'XXL']
-      if (data.variants?.some(v => v.options?.size && !allowed.includes(v.options.size))) {
+      if (data.variants?.some(v => v.options?.size && !CLOTHES_SIZES.includes(v.options.size))) {
         return res.status(400).json({ message: 'Invalid clothing size' })
+      }
+    }
+    if (data.clothingType === 'bags') {
+      if (data.variants?.some(v => v.options?.size && !BAG_SIZES.includes(String(v.options.size)))) {
+        return res.status(400).json({ message: 'Invalid bag size' })
+      }
+    }
+    if (data.clothingType === 'eyeglass') {
+      if (data.variants?.some(v => v.options?.size && !EYEGLASS_SIZES.includes(String(v.options.size)))) {
+        return res.status(400).json({ message: 'Invalid eyeglass size' })
       }
     }
 
@@ -866,6 +918,28 @@ exports.updateProduct = async (req, res) => {
         return res.status(400).json({
           message: 'clothingType is only allowed for clothing category'
         })
+      }
+    }
+
+    const effectiveClothingType = data.clothingType || existingProduct.clothingType
+    if (Array.isArray(payload.variants) && effectiveClothingType === 'shoes') {
+      if (payload.variants.some(v => v?.options?.size && !SHOE_SIZES.includes(String(v.options.size)))) {
+        return res.status(400).json({ message: 'Invalid shoe size' })
+      }
+    }
+    if (Array.isArray(payload.variants) && effectiveClothingType === 'clothes') {
+      if (payload.variants.some(v => v?.options?.size && !CLOTHES_SIZES.includes(String(v.options.size)))) {
+        return res.status(400).json({ message: 'Invalid clothing size' })
+      }
+    }
+    if (Array.isArray(payload.variants) && (effectiveClothingType === 'bags' || effectiveClothingType === 'bag')) {
+      if (payload.variants.some(v => v?.options?.size && !BAG_SIZES.includes(String(v.options.size)))) {
+        return res.status(400).json({ message: 'Invalid bag size' })
+      }
+    }
+    if (Array.isArray(payload.variants) && effectiveClothingType === 'eyeglass') {
+      if (payload.variants.some(v => v?.options?.size && !EYEGLASS_SIZES.includes(String(v.options.size)))) {
+        return res.status(400).json({ message: 'Invalid eyeglass size' })
       }
     }
 
