@@ -145,16 +145,8 @@ productSchema.index({ sku: 1 })
 
 /* ================= AUTO SYNC (SAFE) ================= */
 productSchema.pre('save', function (next) {
-  if (Array.isArray(this.variants) && this.variants.length > 0) {
-    const prices = this.variants.map(v => v.price).filter(Boolean)
-    // We NO LONGER overwrite this.stock with the sum of variants here.
-    // This allows the base product to have its own independent stock.
-
-    if (prices.length) {
-      this.price = Math.min(...prices)
-    }
-  }
-
+  // Keep base product price independent from variant prices.
+  // Variants carry their own price values and should not overwrite product.price.
   next()
 })
 

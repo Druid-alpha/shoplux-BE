@@ -791,10 +791,7 @@ exports.createProduct = async (req, res) => {
       reviewsCount: 0,
       createdBy: req.user.id,
     })
-    if (product.variants.length) {
-      product.price = Math.min(...product.variants.map(v => v.price))
-      await product.save()
-    }
+    await product.save()
     invalidateFeaturedCache()
 
     res.status(201).json({ product })
@@ -991,13 +988,6 @@ exports.updateProduct = async (req, res) => {
       { new: true, runValidators: true }
     )
 
-    // Sync prices if variants exist
-    if (product.variants?.length > 0) {
-      product.price = Math.min(...product.variants.map(v => v.price))
-      // ? We NO LONGER overwrite product.stock here.
-      // The base stock and variant stock remain independent.
-    }
-
     await product.save()
     invalidateFeaturedCache()
 
@@ -1073,7 +1063,6 @@ exports.updateVariants = async (req, res) => {
     )
 
     product.variants = normalizeVariants(updatedVariants)
-    product.price = Math.min(...product.variants.map(v => v.price))
 
     await product.save()
     invalidateFeaturedCache()
