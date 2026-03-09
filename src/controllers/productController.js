@@ -34,6 +34,7 @@ const normalizeVariants = (variants = []) =>
       size: v.options?.size || null
     },
     price: Number(v.price) || 0,
+    discount: Number(v.discount) || 0,
     stock: Number(v.stock) || 0,
     image: v.image?.url && v.image?.public_id ? v.image : null
   }))
@@ -239,6 +240,7 @@ const variantSchema = z.object({
     size: z.string().optional()
   }),
   price: z.coerce.number().min(0),
+  discount: z.coerce.number().min(0).optional(),
   stock: z.coerce.number().min(0),
 
 
@@ -973,6 +975,7 @@ exports.updateProduct = async (req, res) => {
             sku: variant.sku,
             options: variant.options,
             price: Number(variant.price),
+            discount: Number(variant.discount) || 0,
             stock: Number(variant.stock),
             image
           }

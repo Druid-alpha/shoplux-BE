@@ -44,8 +44,9 @@ exports.createOrder = async (req, res) => {
       let price = product.price
 
       // ✅ Apply Discount logic
-      if (product.discount > 0) {
-        price = price * (1 - product.discount / 100)
+      const baseDiscount = Number(product.discount || 0)
+      if (baseDiscount > 0) {
+        price = price * (1 - baseDiscount / 100)
       }
 
       let variantData = null
@@ -62,11 +63,15 @@ exports.createOrder = async (req, res) => {
           throw new Error('Insufficient variant stock')
         }
 
-        price = variant.price
+        const variantDiscount = Number(variant.discount ?? product.discount ?? 0)
+        price = variantDiscount > 0
+          ? variant.price * (1 - variantDiscount / 100)
+          : variant.price
         variantData = {
           _id: variant._id,
           sku: variant.sku,
-          price: variant.price
+          price: variant.price,
+          discount: variantDiscount
         }
 
       } else {
