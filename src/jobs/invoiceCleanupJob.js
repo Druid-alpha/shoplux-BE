@@ -1,28 +1,42 @@
 const Order = require('../../models/order')
 const cloudinary = require('../config/cloudinary')
 
-const DEFAULT_RETENTION_DAYS = 30
-const DEFAULT_INTERVAL_HOURS = 24
+const RECEIPT_RETENTION_DAYS = 3
+const CLEANUP_INTERVAL_HOURS = 24
 
-function toPositiveInt(value, fallback) {
-  const num = Number.parseInt(value, 10)
-  return Number.isFinite(num) && num > 0 ? num : fallback
-}
+function getPublicIdFromInvoiceUrl(invoiceUrl) {
+  if (!invoiceUrl) return null
 
-function isCleanupEnabled() {
-  const raw = String(process.env.INVOICE_CLEANUP_ENABLED || 'true').toLowerCase()
-  return !['false', '0', 'off', 'no'].includes(raw)
+  try {
+    const withoutQuery = invoiceUrl.split('?')[0]
+    const uploadMarker = '/upload/'
+    const uploadIndex = withoutQuery.indexOf(uploadMarker)
+    if (uploadIndex === -1) return null
+
+    let assetPath = withoutQuery.slice(uploadIndex + uploadMarker.length)
+    const pathParts = assetPath.split('/')
+
+    // Remove optional version segment like v1736422310
+    if (pathParts.length && /^v\d+$/.test(pathParts[0])) {
+      pathParts.shift()
+    }
+
+    if (!pathParts.length) return null
+    const joinedPath = pathParts.join('/')
+    return joinedPath.replace(/\.[^/.]+$/, '')
+  } catch (error) {
+    return null
+  }
 }
 
 async function runInvoiceCleanupOnce() {
-  const retentionDays = toPositiveInt(process.env.INVOICE_RETENTION_DAYS, DEFAULT_RETENTION_DAYS)
-  const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000)
+  const cutoff = new Date(Date.now() - RECEIPT_RETENTION_DAYS * 24 * 60 * 60 * 1000)
 
   const staleOrders = await Order.find({
     paymentStatus: 'paid',
     invoiceUrl: { $exists: true, $ne: '' },
     createdAt: { $lt: cutoff }
-  }).select('_id')
+  }).select('_id invoiceUrl')
 
   if (!staleOrders.length) {
     console.log('[INVOICE CLEANUP] No stale invoices found.')
@@ -30,7 +44,9 @@ async function runInvoiceCleanupOnce() {
   }
 
   const orderIds = staleOrders.map((o) => String(o._id))
-  const publicIds = orderIds.map((id) => `invoices/invoice-${id}`)
+  const publicIds = staleOrders.map((order) => {
+    return getPublicIdFromInvoiceUrl(order.invoiceUrl) || `invoices/invoice-${order._id}`
+  })
   const chunkSize = 100
 
   for (let i = 0; i < publicIds.length; i += chunkSize) {
@@ -50,17 +66,11 @@ async function runInvoiceCleanupOnce() {
     { $unset: { invoiceUrl: 1 } }
   )
 
-  console.log(`[INVOICE CLEANUP] Cleared ${orderIds.length} stale invoice(s) older than ${retentionDays} day(s).`)
+  console.log(`[INVOICE CLEANUP] Cleared ${orderIds.length} stale invoice(s) older than ${RECEIPT_RETENTION_DAYS} day(s).`)
 }
 
 function startInvoiceCleanupJob() {
-  if (!isCleanupEnabled()) {
-    console.log('[INVOICE CLEANUP] Disabled by INVOICE_CLEANUP_ENABLED.')
-    return
-  }
-
-  const intervalHours = toPositiveInt(process.env.INVOICE_CLEANUP_INTERVAL_HOURS, DEFAULT_INTERVAL_HOURS)
-  const intervalMs = intervalHours * 60 * 60 * 1000
+  const intervalMs = CLEANUP_INTERVAL_HOURS * 60 * 60 * 1000
 
   // Run once shortly after startup, then on interval.
   setTimeout(() => {
@@ -75,7 +85,7 @@ function startInvoiceCleanupJob() {
     })
   }, intervalMs)
 
-  console.log(`[INVOICE CLEANUP] Enabled. Retention=${toPositiveInt(process.env.INVOICE_RETENTION_DAYS, DEFAULT_RETENTION_DAYS)} day(s), Interval=${intervalHours} hour(s).`)
+  console.log(`[INVOICE CLEANUP] Enabled. Retention=${RECEIPT_RETENTION_DAYS} day(s), Interval=${CLEANUP_INTERVAL_HOURS} hour(s).`)
 }
 
 module.exports = {

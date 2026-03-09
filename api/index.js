@@ -1,4 +1,4 @@
-require('dotenv').config()
+﻿require('dotenv').config()
 const express = require('express')
 const mongoose = require('mongoose')
 const helmet = require('helmet')
@@ -9,6 +9,7 @@ const morgan = require('morgan')
 
 const bcrypt = require('bcryptjs')
 const User = require('../models/user')
+const { runInvoiceCleanupOnce } = require('../src/jobs/invoiceCleanupJob')
 
 const app = express()
 
@@ -24,7 +25,7 @@ async function connectDB() {
     try {
         const db = await mongoose.connect(process.env.MONGO_URI)
         isConnected = db.connections[0].readyState
-        console.log('✅ MongoDB connected')
+        console.log('âœ… MongoDB connected')
 
         // create admin only once
         const existingAdmin = await User.findOne({
@@ -45,10 +46,10 @@ async function connectDB() {
                 emailVerified: true
             })
 
-            console.log('✅ Default admin created')
+            console.log('âœ… Default admin created')
         }
     } catch (err) {
-        console.error('❌ MongoDB connection error:', err.message)
+        console.error('âŒ MongoDB connection error:', err.message)
         throw err
     }
 }
@@ -102,6 +103,23 @@ app.use('/api/wishlist', require('../src/routes/wishlistRoutes'))
 app.use('/api/admin', require('../src/routes/adminRoutes'))
 app.use('/api/payments', require('../src/routes/paymentRoutes'))
 
+
+app.get('/api/cron/invoice-cleanup', async (req, res) => {
+    const expectedSecret = process.env.CRON_SECRET
+    const providedSecret = req.headers['x-cron-secret']
+
+    if (expectedSecret && providedSecret !== expectedSecret) {
+        return res.status(401).json({ message: 'Unauthorized' })
+    }
+
+    try {
+        await runInvoiceCleanupOnce()
+        return res.json({ ok: true, job: 'invoice-cleanup' })
+    } catch (error) {
+        console.error('[INVOICE CLEANUP] Cron run failed:', error.message)
+        return res.status(500).json({ message: 'Invoice cleanup failed' })
+    }
+})
 /* ------------------------------------------------
    HEALTH
 ------------------------------------------------- */

@@ -201,26 +201,11 @@ exports.listAllReviews = async (req, res) => {
 
 exports.getFeaturedReviews = async (req, res) => {
   try {
-    // 1. Prioritize manually featured reviews
-    let reviews = await Review.find({ isFeatured: true })
+    // Home should only show admin-featured reviews.
+    const reviews = await Review.find({ isFeatured: true })
       .populate('user', 'name avatar')
       .populate('product', 'title')
       .sort({ createdAt: -1 })
-
-    // 2. If fewer than 4 featured, fill with top-rated helpful reviews
-    if (reviews.length < 4) {
-      const topRated = await Review.find({
-        rating: { $gte: 4 },
-        body: { $ne: '' },
-        _id: { $nin: reviews.map(r => r._id) }
-      })
-        .populate('user', 'name avatar')
-        .populate('product', 'title')
-        .limit(6 - reviews.length)
-        .sort({ helpful: -1, createdAt: -1 })
-
-      reviews = [...reviews, ...topRated]
-    }
 
     res.json({ reviews })
   } catch (err) {
