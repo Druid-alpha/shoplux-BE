@@ -50,11 +50,15 @@ exports.createOrder = async (req, res) => {
       }
 
       let variantData = null
+      const cartVariant = cartItem.variant || {}
+      const cartVariantSku = cartVariant.sku || null
+      const cartVariantSize = cartVariant.size || null
+      const cartVariantColor = cartVariant.color || null
 
-      if (cartItem.variant && (cartItem.variant._id || cartItem.variant.sku)) {
+      if (cartVariant && (cartVariant._id || cartVariantSku)) {
         const variant = product.variants.find(
-          v => (cartItem.variant._id && String(v._id) === String(cartItem.variant._id)) ||
-            (cartItem.variant.sku && v.sku === cartItem.variant.sku)
+          v => (cartVariant._id && String(v._id) === String(cartVariant._id)) ||
+            (cartVariantSku && v.sku === cartVariantSku)
         )
 
         if (!variant) throw new Error('Variant not found')
@@ -71,12 +75,20 @@ exports.createOrder = async (req, res) => {
           _id: variant._id,
           sku: variant.sku,
           price: variant.price,
-          discount: variantDiscount
+          discount: variantDiscount,
+          size: variant.options?.size || cartVariantSize || null,
+          color: variant.options?.color?.name || variant.options?.color?._id || cartVariantColor || null
         }
 
       } else {
         if (product.stock < cartItem.qty) {
           throw new Error('Insufficient product stock')
+        }
+        if (cartVariantSize || cartVariantColor) {
+          variantData = {
+            size: cartVariantSize || null,
+            color: cartVariantColor || null
+          }
         }
       }
 
@@ -289,7 +301,11 @@ async function generateInvoiceForOrder(order) {
   doc.text('------------------------------------------------------------------')
 
   order.items.forEach((item, i) => {
-    const variantInfo = item.variant?.sku ? ` [${item.variant.sku}]` : ''
+    const variantParts = []
+    if (item.variant?.sku) variantParts.push(`SKU ${item.variant.sku}`)
+    if (item.variant?.color) variantParts.push(`Color ${item.variant.color}`)
+    if (item.variant?.size) variantParts.push(`Size ${item.variant.size}`)
+    const variantInfo = variantParts.length > 0 ? ` [${variantParts.join(' | ')}]` : ''
     const itemName = item.title || 'Product'
     const lineTotal = (item.priceAtPurchase || 0) * item.qty
     doc.font('Helvetica-Bold').text(`${i + 1}. ${itemName}${variantInfo}`)

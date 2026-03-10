@@ -8,7 +8,10 @@ const orderItemSchema = new mongoose.Schema({
   variant: {
     _id: mongoose.Schema.Types.ObjectId,
     sku: String,
-    price: Number
+    price: Number,
+    discount: Number,
+    size: String,
+    color: String
   }
 })
 
