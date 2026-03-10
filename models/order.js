@@ -5,6 +5,7 @@ const orderItemSchema = new mongoose.Schema({
   title: String,
   qty: Number,
   priceAtPurchase: Number,
+  clothingType: { type: String, default: null }, // 'clothes' | 'shoes' | 'bags' | 'eyeglass' | null
   variant: {
     _id: mongoose.Schema.Types.ObjectId,
     sku: String,

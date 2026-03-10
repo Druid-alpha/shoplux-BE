@@ -99,6 +99,7 @@ exports.createOrder = async (req, res) => {
         title: product.title,
         qty: cartItem.qty,
         priceAtPurchase: price,
+        clothingType: product.clothingType || null,
         variant: variantData || null
       })
 
@@ -345,7 +346,7 @@ async function generateInvoiceForOrder(order) {
   order.invoiceUrl = uploaded.secure_url
   await order.save()
 
-  if (fs.existsSync(tmpPath)) fs.unlink(tmpPath, () => {})
+  if (fs.existsSync(tmpPath)) fs.unlink(tmpPath, () => { })
 
   return order.invoiceUrl
 }
