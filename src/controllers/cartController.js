@@ -1,10 +1,59 @@
 const mongoose = require('mongoose');
 const User = require('../../models/user');
 const Product = require('../../models/product');
+const Color = require('../../models/Color');
+
+const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(value);
+
+const attachColorMeta = async (cart = []) => {
+  const ids = new Set();
+  cart.forEach(item => {
+    const vColor = item?.variant?.color;
+    if (typeof vColor === 'string' && isValidObjectId(vColor)) ids.add(vColor);
+    const pColor = item?.product?.color;
+    if (typeof pColor === 'string' && isValidObjectId(pColor)) ids.add(pColor);
+    const variants = item?.product?.variants || [];
+    variants.forEach(v => {
+      const c = v?.options?.color;
+      if (typeof c === 'string' && isValidObjectId(c)) ids.add(c);
+    });
+  });
+
+  if (!ids.size) return cart;
+  const colors = await Color.find({ _id: { $in: Array.from(ids) } }).select('_id name hex');
+  const map = new Map(colors.map(c => [String(c._id), c]));
+
+  cart.forEach(item => {
+    if (item?.variant?.color && typeof item.variant.color === 'string') {
+      const c = map.get(String(item.variant.color));
+      if (c) item.variant.color = c;
+    }
+    if (item?.product?.color && typeof item.product.color === 'string') {
+      const c = map.get(String(item.product.color));
+      if (c) item.product.color = c;
+    }
+    const variants = item?.product?.variants || [];
+    variants.forEach(v => {
+      if (typeof v?.options?.color === 'string') {
+        const c = map.get(String(v.options.color));
+        if (c) v.options.color = c;
+      }
+    });
+  });
+
+  return cart;
+};
 
 /* ================= GET CART ================= */
 exports.getCart = async (req, res) => {
-  const user = await User.findById(req.user.id).populate('cart.product');
+  const user = await User.findById(req.user.id).populate({
+    path: 'cart.product',
+    populate: [
+      { path: 'color' },
+      { path: 'variants.options.color' },
+      { path: 'category', select: 'name' }
+    ]
+  });
   if (!user) return res.status(404).json({ message: 'User not found' });
 
   // ⚡ AUTO-CLEANUP: If any product was hard-deleted, remove it from the cart
@@ -16,6 +65,7 @@ exports.getCart = async (req, res) => {
     console.log(`[CART CLEANUP] Removed ${originalCount - user.cart.length} dead items for user ${user._id}`);
   }
 
+  await attachColorMeta(user.cart);
   res.json({ cart: user.cart });
 };
 
@@ -91,8 +141,16 @@ exports.addToCart = async (req, res) => {
     }
 
     await user.save();
-    await user.populate('cart.product');
+    await user.populate({
+      path: 'cart.product',
+      populate: [
+        { path: 'color' },
+        { path: 'variants.options.color' },
+        { path: 'category', select: 'name' }
+      ]
+    });
 
+    await attachColorMeta(user.cart);
     res.json({ cart: user.cart });
   } catch (error) {
     console.error('Add to cart error:', error);
@@ -143,8 +201,16 @@ exports.updateItem = async (req, res) => {
     user.cart[idx].qty = Math.min(Math.max(1, qty), stockLimit);
 
     await user.save();
-    await user.populate('cart.product');
+    await user.populate({
+      path: 'cart.product',
+      populate: [
+        { path: 'color' },
+        { path: 'variants.options.color' },
+        { path: 'category', select: 'name' }
+      ]
+    });
 
+    await attachColorMeta(user.cart);
     res.json({ cart: user.cart });
   } catch (error) {
     console.error('Update cart item error:', error);
@@ -179,8 +245,16 @@ exports.removeItem = async (req, res) => {
     });
 
     await user.save();
-    await user.populate('cart.product');
+    await user.populate({
+      path: 'cart.product',
+      populate: [
+        { path: 'color' },
+        { path: 'variants.options.color' },
+        { path: 'category', select: 'name' }
+      ]
+    });
 
+    await attachColorMeta(user.cart);
     res.json({ cart: user.cart });
   } catch (error) {
     console.error('🔥 SERVER ERROR:', error);
@@ -272,8 +346,16 @@ exports.syncCart = async (req, res) => {
     }
 
     await user.save()
-    await user.populate('cart.product')
+    await user.populate({
+      path: 'cart.product',
+      populate: [
+        { path: 'color' },
+        { path: 'variants.options.color' },
+        { path: 'category', select: 'name' }
+      ]
+    })
 
+    await attachColorMeta(user.cart)
     res.json({ cart: user.cart })
 
   } catch (error) {

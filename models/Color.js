@@ -30,6 +30,34 @@ const normalizeHex = (hex) => {
   return h
 }
 
+const HEX_NAME_MAP = {
+  '#000000': 'Midnight Black',
+  '#0f172a': 'Midnight',
+  '#111111': 'Jet Black',
+  '#1f2937': 'Charcoal',
+  '#374151': 'Graphite',
+  '#6b7280': 'Slate Gray',
+  '#9ca3af': 'Steel Gray',
+  '#d1d5db': 'Silver',
+  '#e5e7eb': 'Cloud',
+  '#f5f5f5': 'Soft White',
+  '#ffffff': 'Pure White',
+  '#ef4444': 'Crimson',
+  '#f97316': 'Tangerine',
+  '#f59e0b': 'Amber',
+  '#facc15': 'Gold',
+  '#22c55e': 'Emerald',
+  '#14b8a6': 'Teal',
+  '#3b82f6': 'Royal Blue',
+  '#6366f1': 'Indigo',
+  '#8b5cf6': 'Violet',
+  '#ec4899': 'Rose',
+  '#efeae6': 'Pearl White',
+  '#656b83': 'Slate Blue'
+}
+
+const isHexLike = (value) => /^[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(String(value || ''))
+
 const familyFromName = (name) => {
   const n = String(name || '').toLowerCase()
   if (!n) return ''
@@ -78,7 +106,16 @@ const familyFromHex = (hex) => {
   return ''
 }
 
+const titleCase = (value) =>
+  value ? value.charAt(0).toUpperCase() + value.slice(1) : ''
+
 colorSchema.pre('save', function (next) {
+  if (this.name && (this.name.startsWith('#') || isHexLike(this.name))) {
+    const hex = normalizeHex(this.name)
+    const mapped = HEX_NAME_MAP[hex]
+    const family = familyFromHex(hex)
+    this.name = mapped || titleCase(family) || this.name
+  }
   if (!this.family) {
     const fromName = familyFromName(this.name)
     const fromHex = familyFromHex(this.hex)
