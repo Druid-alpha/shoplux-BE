@@ -322,11 +322,27 @@ async function generateInvoiceForOrder(order) {
   doc.font('Helvetica')
   doc.text('------------------------------------------------------------------')
 
+  const normalizeColorLabel = (raw) => {
+    if (!raw) return ''
+    if (typeof raw === 'object') {
+      if (raw.name) return raw.name
+      if (raw.hex) return raw.hex
+    }
+    return String(raw)
+  }
+
+  const sizeLabelForItem = (item) => {
+    const type = String(item?.clothingType || '').toLowerCase()
+    if (['clothes', 'shoes', 'bags', 'bag', 'eyeglass'].includes(type)) return 'Size'
+    return 'Spec'
+  }
+
   order.items.forEach((item, i) => {
     const variantParts = []
     if (item.variant?.sku) variantParts.push(`SKU ${item.variant.sku}`)
-    if (item.variant?.color) variantParts.push(`Color ${item.variant.color}`)
-    if (item.variant?.size) variantParts.push(`Size ${item.variant.size}`)
+    const colorLabel = normalizeColorLabel(item.variant?.color)
+    if (colorLabel) variantParts.push(`Color ${colorLabel}`)
+    if (item.variant?.size) variantParts.push(`${sizeLabelForItem(item)} ${item.variant.size}`)
     const variantInfo = variantParts.length > 0 ? ` [${variantParts.join(' | ')}]` : ''
     const itemName = item.title || 'Product'
     const lineTotal = (item.priceAtPurchase || 0) * item.qty
