@@ -1,24 +1,5 @@
 const mongoose = require('mongoose')
-const { Schema } = mongoose
-
-const colorSchema = new Schema(
-  {
-    name: { type: String, required: true, trim: true },
-    hex: { type: String, required: true },
-    family: { type: String, default: '', index: true },
-
-    // 👇 REQUIRED for Clothing-only colors
-    category: {
-      type: Schema.Types.ObjectId,
-      ref: 'Category',
-      required: true
-    }
-  },
-  { timestamps: true }
-)
-
-// Prevent duplicate colors per category
-colorSchema.index({ name: 1, category: 1 }, { unique: true })
+const Color = require('../models/Color')
 
 const normalizeHex = (hex) => {
   if (!hex) return ''
@@ -54,14 +35,11 @@ const familyFromHex = (hex) => {
   const r = parseInt(h.slice(1, 3), 16)
   const g = parseInt(h.slice(3, 5), 16)
   const b = parseInt(h.slice(5, 7), 16)
-
   const max = Math.max(r, g, b)
   const min = Math.min(r, g, b)
-
   if (max < 40) return 'black'
   if (min > 220) return 'white'
   if (max - min < 20) return 'gray'
-
   if (r >= g && r >= b) {
     if (g > 160) return 'orange'
     if (g > 120) return 'orange'
@@ -78,13 +56,54 @@ const familyFromHex = (hex) => {
   return ''
 }
 
-colorSchema.pre('save', function (next) {
-  if (!this.family) {
-    const fromName = familyFromName(this.name)
-    const fromHex = familyFromHex(this.hex)
-    this.family = fromName || fromHex || ''
-  }
-  next()
-})
+const inferFamily = (color) => {
+  if (!color) return ''
+  const fromName = familyFromName(color.name)
+  if (fromName) return fromName
+  return familyFromHex(color.hex)
+}
 
-module.exports = mongoose.model('Color', colorSchema)
+const run = async () => {
+  const uri = process.env.MONGO_URI
+  if (!uri) {
+    console.error('MONGO_URI is not set')
+    process.exit(1)
+  }
+
+  await mongoose.connect(uri)
+  const colors = await Color.find({ $or: [{ family: { $exists: false } }, { family: '' }, { family: null }] })
+    .select('_id name hex family')
+
+  if (!colors.length) {
+    console.log('No colors to update')
+    await mongoose.disconnect()
+    return
+  }
+
+  const updates = []
+  colors.forEach(c => {
+    const family = inferFamily(c)
+    if (family) {
+      updates.push({
+        updateOne: {
+          filter: { _id: c._id },
+          update: { $set: { family } }
+        }
+      })
+    }
+  })
+
+  if (updates.length) {
+    const res = await Color.bulkWrite(updates, { ordered: false })
+    console.log(`Updated ${res.modifiedCount || 0} colors`)
+  } else {
+    console.log('No colors matched for update')
+  }
+
+  await mongoose.disconnect()
+}
+
+run().catch(err => {
+  console.error(err)
+  process.exit(1)
+})

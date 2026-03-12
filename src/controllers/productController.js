@@ -39,6 +39,100 @@ const normalizeVariants = (variants = []) =>
     image: v.image?.url && v.image?.public_id ? v.image : null
   }))
 
+const normalizeHex = (hex) => {
+  if (!hex) return ''
+  let h = String(hex).trim().toLowerCase()
+  if (!h.startsWith('#')) h = `#${h}`
+  if (h.length === 4) {
+    h = `#${h[1]}${h[1]}${h[2]}${h[2]}${h[3]}${h[3]}`
+  }
+  return h
+}
+
+const familyFromName = (name) => {
+  const n = String(name || '').toLowerCase()
+  if (!n) return ''
+  if (n.includes('black') || n.includes('onyx') || n.includes('midnight')) return 'black'
+  if (n.includes('white') || n.includes('ivory') || n.includes('snow') || n.includes('cream')) return 'white'
+  if (n.includes('gray') || n.includes('grey') || n.includes('silver') || n.includes('slate') || n.includes('graphite')) return 'gray'
+  if (n.includes('red') || n.includes('crimson') || n.includes('ruby') || n.includes('burgundy') || n.includes('maroon')) return 'red'
+  if (n.includes('orange') || n.includes('tangerine') || n.includes('amber') || n.includes('coral')) return 'orange'
+  if (n.includes('yellow') || n.includes('gold') || n.includes('lemon')) return 'yellow'
+  if (n.includes('green') || n.includes('emerald') || n.includes('mint') || n.includes('jade')) return 'green'
+  if (n.includes('blue') || n.includes('navy') || n.includes('azure') || n.includes('sapphire')) return 'blue'
+  if (n.includes('purple') || n.includes('violet') || n.includes('indigo') || n.includes('plum')) return 'purple'
+  if (n.includes('pink') || n.includes('rose') || n.includes('fuchsia')) return 'pink'
+  if (n.includes('brown') || n.includes('tan') || n.includes('beige') || n.includes('camel')) return 'brown'
+  if (n.includes('teal') || n.includes('cyan') || n.includes('aqua') || n.includes('turquoise')) return 'teal'
+  return ''
+}
+
+const familyFromHex = (hex) => {
+  const h = normalizeHex(hex)
+  if (!h) return ''
+  const r = parseInt(h.slice(1, 3), 16)
+  const g = parseInt(h.slice(3, 5), 16)
+  const b = parseInt(h.slice(5, 7), 16)
+  const max = Math.max(r, g, b)
+  const min = Math.min(r, g, b)
+  if (max < 40) return 'black'
+  if (min > 220) return 'white'
+  if (max - min < 20) return 'gray'
+  if (r >= g && r >= b) {
+    if (g > 160) return 'orange'
+    if (g > 120) return 'orange'
+    return 'red'
+  }
+  if (g >= r && g >= b) {
+    if (b > 140) return 'teal'
+    return 'green'
+  }
+  if (b >= r && b >= g) {
+    if (r > 140) return 'purple'
+    return 'blue'
+  }
+  return ''
+}
+
+const inferFamily = (color) => {
+  if (!color) return ''
+  const fromName = familyFromName(color.name)
+  if (fromName) return fromName
+  return familyFromHex(color.hex)
+}
+
+const expandColorIdsByFamily = async (colorIds = []) => {
+  if (!colorIds.length) return colorIds
+  const colors = await Color.find({ _id: { $in: colorIds } }).select('_id family name hex')
+  if (!colors.length) return colorIds
+
+  const families = new Set()
+  const updates = []
+
+  colors.forEach(c => {
+    const family = c.family || inferFamily(c)
+    if (family) families.add(family)
+    if (!c.family && family) {
+      updates.push({
+        updateOne: {
+          filter: { _id: c._id },
+          update: { $set: { family } }
+        }
+      })
+    }
+  })
+
+  if (updates.length) {
+    await Color.bulkWrite(updates, { ordered: false })
+  }
+
+  if (families.size === 0) return colorIds
+  const familyColors = await Color.find({ family: { $in: Array.from(families) } }).select('_id')
+  const expanded = new Set(colorIds.map(String))
+  familyColors.forEach(c => expanded.add(String(c._id)))
+  return Array.from(expanded).map(toObjectId)
+}
+
 const CLOTHING_TYPES = ['clothes', 'shoes', 'bags', 'bag', 'eyeglass']
 const CLOTHES_SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL']
 const SHOE_SIZES = ['36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46']
@@ -199,10 +293,11 @@ const buildQueryFromReq = async (req, { admin = false } = {}) => {
   if (req.query.color && req.query.color !== 'all') {
     const colorIds = parseObjectIdList(req.query.color)
     if (colorIds.length > 0) {
+      const expandedColorIds = await expandColorIdsByFamily(colorIds)
       andConditions.push({
         $or: [
-          { color: { $in: colorIds } },
-          { 'variants.options.color': { $in: colorIds } }
+          { color: { $in: expandedColorIds } },
+          { 'variants.options.color': { $in: expandedColorIds } }
         ]
       })
     } else {
@@ -364,6 +459,9 @@ exports.getFilterOptions = async (req, res) => {
       : null
     const selectedBrandIds = parseObjectIdList(req.query.brand)
     const selectedColorIds = parseObjectIdList(req.query.color)
+    const expandedSelectedColorIds = selectedColorIds.length
+      ? await expandColorIdsByFamily(selectedColorIds)
+      : []
 
     const baseFilter = { isDeleted: false }
     if (category) baseFilter.category = category._id
@@ -394,10 +492,10 @@ exports.getFilterOptions = async (req, res) => {
 
     // Brand facet respects category + clothingType + selected color
     const brandScope = { ...baseFilter }
-    if (selectedColorIds.length) {
+    if (expandedSelectedColorIds.length) {
       brandScope.$or = [
-        { color: { $in: selectedColorIds } },
-        { 'variants.options.color': { $in: selectedColorIds } }
+        { color: { $in: expandedSelectedColorIds } },
+        { 'variants.options.color': { $in: expandedSelectedColorIds } }
       ]
     }
     const brandIds = await Product.distinct('brand', brandScope)
@@ -428,10 +526,10 @@ exports.getFilterOptions = async (req, res) => {
 
     const activeProductFilter = { ...baseFilter }
     if (selectedBrandIds.length) activeProductFilter.brand = { $in: selectedBrandIds }
-    if (selectedColorIds.length) {
+    if (expandedSelectedColorIds.length) {
       activeProductFilter.$or = [
-        { color: { $in: selectedColorIds } },
-        { 'variants.options.color': { $in: selectedColorIds } }
+        { color: { $in: expandedSelectedColorIds } },
+        { 'variants.options.color': { $in: expandedSelectedColorIds } }
       ]
     }
     const matchedProducts = await Product.countDocuments(activeProductFilter)
