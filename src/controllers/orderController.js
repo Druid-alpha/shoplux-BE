@@ -17,6 +17,23 @@ function buildPublicInvoiceUrl(orderId, version) {
   })
 }
 
+function buildSignedInvoiceUrl(orderId, version) {
+  return cloudinary.url(`invoices/invoice-${orderId}`, {
+    resource_type: 'raw',
+    type: 'upload',
+    format: 'pdf',
+    secure: true,
+    sign_url: true,
+    ...(version ? { version } : {})
+  })
+}
+
+function getVersionFromUrl(url) {
+  if (!url) return null
+  const match = String(url).match(/\/v(\d+)\//)
+  return match ? Number(match[1]) : null
+}
+
 
 exports.createOrder = async (req, res) => {
   try {
@@ -251,11 +268,15 @@ exports.generateOrderInvoice = async (req, res) => {
         order.invoiceUrl = buildPublicInvoiceUrl(order._id)
         await order.save()
       }
-      return res.json({ invoiceUrl: order.invoiceUrl, generated: false })
+      const version = getVersionFromUrl(order.invoiceUrl)
+      const signedUrl = buildSignedInvoiceUrl(order._id, version)
+      return res.json({ invoiceUrl: signedUrl, generated: false })
     }
 
     const invoiceUrl = await generateInvoiceForOrder(order)
-    return res.json({ invoiceUrl, generated: true })
+    const version = getVersionFromUrl(invoiceUrl)
+    const signedUrl = buildSignedInvoiceUrl(order._id, version)
+    return res.json({ invoiceUrl: signedUrl, generated: true })
   } catch (error) {
     console.error('Generate invoice error:', error)
     res.status(500).json({ message: 'Failed to generate invoice' })
