@@ -899,9 +899,26 @@ exports.updateProduct = async (req, res) => {
     }
 
 
-    const payload = req.body.payload
+    const rawPayload = req.body.payload
       ? JSON.parse(req.body.payload)
       : req.body
+
+    const parsedSizes =
+      typeof rawPayload.sizes === 'string'
+        ? JSON.parse(rawPayload.sizes)
+        : rawPayload.sizes
+
+    const normalizedTags = rawPayload.tags
+      ? Array.isArray(rawPayload.tags)
+        ? rawPayload.tags
+        : String(rawPayload.tags).split(',').map(t => t.trim())
+      : rawPayload.tags
+
+    const payload = {
+      ...rawPayload,
+      sizes: parsedSizes,
+      tags: normalizedTags
+    }
 
     const data = updateSchema.parse(payload)
 
@@ -987,7 +1004,7 @@ exports.updateProduct = async (req, res) => {
     if (data.clothingType) {
       update.$set.clothingType = data.clothingType
     }
-    if (data.sizes) {
+    if (data.sizes !== undefined) {
       update.$set.sizes = sanitizeSizes(data.sizes)
     }
 
