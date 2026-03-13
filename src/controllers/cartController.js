@@ -14,19 +14,21 @@ const colorKey = (value) => {
 };
 
 const normalizeVariant = (variant) => {
-  if (!variant) return { sku: "", size: "", color: "", empty: true };
+  if (!variant) return { _id: "", sku: "", size: "", color: "", empty: true };
   if (typeof variant === "string") {
     const sku = String(variant || "");
-    return { sku, size: "", color: "", empty: !sku };
+    return { _id: "", sku, size: "", color: "", empty: !sku };
   }
   if (typeof variant === "object") {
+    const rawId = variant._id || variant.id || "";
+    const _id = rawId ? String(rawId) : "";
     const sku = String(variant.sku || "");
     const size = String(variant.size || "");
     const color = colorKey(variant.color);
-    const empty = !(sku || size || color);
-    return { sku, size, color, empty };
+    const empty = !(_id || sku || size || color);
+    return { _id, sku, size, color, empty };
   }
-  return { sku: "", size: "", color: "", empty: true };
+  return { _id: "", sku: "", size: "", color: "", empty: true };
 };
 
 const attachColorMeta = async (cart = []) => {
@@ -98,6 +100,7 @@ exports.addToCart = async (req, res) => {
   try {
     const { productId, qty = 1, variant = null } = req.body;
     const reqVariant = normalizeVariant(variant);
+    const variantId = reqVariant._id || null;
     const variantSku = reqVariant.sku || null;
     const variantSize = reqVariant.size || null;
     const variantColor = reqVariant.color || null;
@@ -119,6 +122,9 @@ exports.addToCart = async (req, res) => {
       const reqProdId = String(productId);
 
       const cartVariant = normalizeVariant(i.variant);
+      if (reqVariant._id) {
+        return cartProdId === reqProdId && cartVariant._id === reqVariant._id;
+      }
       if (reqVariant.sku) {
         return cartProdId === reqProdId && cartVariant.sku === reqVariant.sku;
       }
@@ -130,20 +136,29 @@ exports.addToCart = async (req, res) => {
 
     // Resolve stock limit (Variant vs Base)
     let stockLimit = product.stock;
-    if (variantSku) {
-      const vObj = product.variants.find(v => v.sku === String(variantSku));
-      if (vObj) stockLimit = vObj.stock;
+    let vObj = null;
+    if (variantId) {
+      vObj = product.variants.find(v => String(v._id) === String(variantId));
     }
+    if (!vObj && variantSku) {
+      vObj = product.variants.find(v => v.sku === String(variantSku));
+    }
+    if (vObj) stockLimit = vObj.stock;
 
     if (idx >= 0) {
       // increment qty safely
       user.cart[idx].qty = Math.min(stockLimit, user.cart[idx].qty + Number(qty));
     } else {
       let variantPayload = null;
-      if (variantSku) {
-        const vObj = product.variants.find(v => v.sku === String(variantSku));
+      if (variantSku || variantId) {
+        if (!vObj) {
+          vObj = variantId
+            ? product.variants.find(v => String(v._id) === String(variantId))
+            : product.variants.find(v => v.sku === String(variantSku));
+        }
         variantPayload = {
-          sku: String(variantSku),
+          _id: vObj?._id || variantId || undefined,
+          sku: vObj?.sku || variantSku || undefined,
           size: vObj?.options?.size || variantSize || undefined,
           color: vObj?.options?.color?._id || vObj?.options?.color || variantColor || undefined
         };
@@ -185,6 +200,7 @@ exports.updateItem = async (req, res) => {
   try {
     const { productId, qty, variant = null } = req.body;
     const reqVariant = normalizeVariant(variant);
+    const variantId = reqVariant._id || null;
     const variantSku = reqVariant.sku || null;
     const variantSize = reqVariant.size || null;
     const variantColor = reqVariant.color || null;
@@ -197,6 +213,9 @@ exports.updateItem = async (req, res) => {
       const cartProdId = String(i.product);
       const reqProdId = String(productId);
       const cartVariant = normalizeVariant(i.variant);
+      if (reqVariant._id) {
+        return cartProdId === reqProdId && cartVariant._id === reqVariant._id;
+      }
       if (reqVariant.sku) {
         return cartProdId === reqProdId && cartVariant.sku === reqVariant.sku;
       }
@@ -214,10 +233,14 @@ exports.updateItem = async (req, res) => {
 
     // Resolve stock limit
     let stockLimit = product.stock;
-    if (variantSku) {
-      const vObj = product.variants.find(v => v.sku === String(variantSku));
-      if (vObj) stockLimit = vObj.stock;
+    let vObj = null;
+    if (variantId) {
+      vObj = product.variants.find(v => String(v._id) === String(variantId));
     }
+    if (!vObj && variantSku) {
+      vObj = product.variants.find(v => v.sku === String(variantSku));
+    }
+    if (vObj) stockLimit = vObj.stock;
 
     user.cart[idx].qty = Math.min(Math.max(1, qty), stockLimit);
 
@@ -250,9 +273,11 @@ exports.removeItem = async (req, res) => {
     user.cart = user.cart.filter(i => {
       const isSameProd = String(i.product) === String(productId);
       const cartVariant = normalizeVariant(i.variant);
-      const isReqEmpty = !reqVariant.sku && !reqVariant.size && !reqVariant.color;
+      const isReqEmpty = !reqVariant._id && !reqVariant.sku && !reqVariant.size && !reqVariant.color;
       const isCartColorOnly = !cartVariant.sku && !cartVariant.size && !!cartVariant.color;
-      const isSameVariant = reqVariant.sku
+      const isSameVariant = reqVariant._id
+        ? cartVariant._id === reqVariant._id
+        : reqVariant.sku
         ? cartVariant.sku === reqVariant.sku
         : (isReqEmpty && isCartColorOnly)
           ? true
@@ -301,6 +326,7 @@ exports.syncCart = async (req, res) => {
       const qty = Number(item.qty) || 1
       const variantPayload = item.variant || null
       const reqVariant = normalizeVariant(variantPayload)
+      const variantId = reqVariant._id || null
       const variantSku = reqVariant.sku || null
       const variantSize = reqVariant.size || null
       const variantColor = reqVariant.color || null
@@ -313,6 +339,9 @@ exports.syncCart = async (req, res) => {
         const cartProdId = String(i.product)
         const reqProdId = String(productId)
         const cartVariant = normalizeVariant(i.variant)
+        if (reqVariant._id) {
+          return cartProdId === reqProdId && cartVariant._id === reqVariant._id
+        }
         if (reqVariant.sku) {
           return cartProdId === reqProdId && cartVariant.sku === reqVariant.sku
         }
@@ -324,10 +353,14 @@ exports.syncCart = async (req, res) => {
 
       // Resolve stock
       let stockLimit = product.stock
-      if (variantSku) {
-        const vObj = product.variants.find(v => v.sku === String(variantSku))
-        if (vObj) stockLimit = vObj.stock
+      let vObj = null
+      if (variantId) {
+        vObj = product.variants.find(v => String(v._id) === String(variantId))
       }
+      if (!vObj && variantSku) {
+        vObj = product.variants.find(v => v.sku === String(variantSku))
+      }
+      if (vObj) stockLimit = vObj.stock
 
       if (idx >= 0) {
         user.cart[idx].qty = Math.min(
@@ -336,10 +369,15 @@ exports.syncCart = async (req, res) => {
         )
       } else {
         let variantPayloadToSave = null
-        if (variantSku) {
-          const vObj = product.variants.find(v => v.sku === String(variantSku))
+        if (variantSku || variantId) {
+          if (!vObj) {
+            vObj = variantId
+              ? product.variants.find(v => String(v._id) === String(variantId))
+              : product.variants.find(v => v.sku === String(variantSku))
+          }
           variantPayloadToSave = {
-            sku: String(variantSku),
+            _id: vObj?._id || variantId || undefined,
+            sku: vObj?.sku || variantSku || undefined,
             size: vObj?.options?.size || variantSize || undefined,
             color: vObj?.options?.color?._id || vObj?.options?.color || variantColor || undefined
           }

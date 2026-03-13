@@ -95,33 +95,46 @@ exports.createOrder = async (req, res) => {
       const cartVariantSku = cartVariant.sku || null
       const cartVariantSize = cartVariant.size || null
       const cartVariantColor = cartVariant.color || null
+      const normalizeColorKey = (value) => {
+        if (!value) return ""
+        if (typeof value === 'object') return String(value._id || value.name || value.hex || "")
+        return String(value)
+      }
+      const cartColorKey = normalizeColorKey(cartVariantColor)
 
+      let resolvedVariant = null
       if (cartVariant && (cartVariant._id || cartVariantSku)) {
-        const variant = product.variants.find(
+        resolvedVariant = product.variants.find(
           v => (cartVariant._id && String(v._id) === String(cartVariant._id)) ||
             (cartVariantSku && v.sku === cartVariantSku)
         )
+        if (!resolvedVariant) throw new Error('Variant not found')
+      } else if (cartVariantSize && cartVariantColor && product.variants?.length) {
+        resolvedVariant = product.variants.find(v => {
+          const vColorKey = normalizeColorKey(v.options?.color)
+          return String(v.options?.size || '') === String(cartVariantSize || '') &&
+            vColorKey && cartColorKey && String(vColorKey) === String(cartColorKey)
+        })
+      }
 
-        if (!variant) throw new Error('Variant not found')
-
-        if (variant.stock < cartItem.qty) {
+      if (resolvedVariant) {
+        if (resolvedVariant.stock < cartItem.qty) {
           throw new Error('Insufficient variant stock')
         }
 
-        const variantDiscount = Number(variant.discount ?? product.discount ?? 0)
+        const variantDiscount = Number(resolvedVariant.discount ?? product.discount ?? 0)
         price = variantDiscount > 0
-          ? variant.price * (1 - variantDiscount / 100)
-          : variant.price
-        const colorLabel = await resolveColorLabel(variant.options?.color || cartVariantColor)
+          ? resolvedVariant.price * (1 - variantDiscount / 100)
+          : resolvedVariant.price
+        const colorLabel = await resolveColorLabel(resolvedVariant.options?.color || cartVariantColor)
         variantData = {
-          _id: variant._id,
-          sku: variant.sku,
-          price: variant.price,
+          _id: resolvedVariant._id,
+          sku: resolvedVariant.sku,
+          price: resolvedVariant.price,
           discount: variantDiscount,
-          size: variant.options?.size || cartVariantSize || null,
+          size: resolvedVariant.options?.size || cartVariantSize || null,
           color: colorLabel || null
         }
-
       } else {
         if (product.stock < cartItem.qty) {
           throw new Error('Insufficient product stock')
