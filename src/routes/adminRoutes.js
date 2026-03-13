@@ -19,63 +19,64 @@ router.put('/users/:id', adminCtrl.adminUpdateUser)
 // Soft delete user
 router.delete('/users/:id', adminCtrl.adminDeleteUser)
 
+const normalizeHex = (value) => {
+    if (!value) return ''
+    let h = String(value).trim().toLowerCase()
+    if (!h.startsWith('#')) h = `#${h}`
+    if (h.length === 4) {
+        h = `#${h[1]}${h[1]}${h[2]}${h[2]}${h[3]}${h[3]}`
+    }
+    return /^#[0-9a-f]{6}$/i.test(h) ? h : ''
+}
+const isHexLike = (value) => /^[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(String(value || ''))
+const escapeRegex = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const titleCase = (value) =>
+    value ? value.charAt(0).toUpperCase() + value.slice(1) : ''
+const familyFromHex = (hex) => {
+    const h = normalizeHex(hex)
+    if (!h) return ''
+    const r = parseInt(h.slice(1, 3), 16)
+    const g = parseInt(h.slice(3, 5), 16)
+    const b = parseInt(h.slice(5, 7), 16)
+    const max = Math.max(r, g, b)
+    const min = Math.min(r, g, b)
+    if (max < 40) return 'black'
+    if (min > 220) return 'white'
+    if (max - min < 20) return 'gray'
+    if (r >= g && r >= b) return g > 120 ? 'orange' : 'red'
+    if (g >= r && g >= b) return b > 140 ? 'teal' : 'green'
+    if (b >= r && b >= g) return r > 140 ? 'purple' : 'blue'
+    return ''
+}
+const HEX_NAME_MAP = {
+    '#000000': 'Midnight Black',
+    '#0f172a': 'Midnight',
+    '#111111': 'Jet Black',
+    '#1f2937': 'Charcoal',
+    '#374151': 'Graphite',
+    '#6b7280': 'Slate Gray',
+    '#9ca3af': 'Steel Gray',
+    '#d1d5db': 'Silver',
+    '#e5e7eb': 'Cloud',
+    '#f5f5f5': 'Soft White',
+    '#ffffff': 'Pure White',
+    '#ef4444': 'Crimson',
+    '#f97316': 'Tangerine',
+    '#f59e0b': 'Amber',
+    '#facc15': 'Gold',
+    '#22c55e': 'Emerald',
+    '#14b8a6': 'Teal',
+    '#3b82f6': 'Royal Blue',
+    '#6366f1': 'Indigo',
+    '#8b5cf6': 'Violet',
+    '#ec4899': 'Rose',
+    '#efeae6': 'Pearl White',
+    '#656b83': 'Slate Blue'
+}
+
 // Add a new raw color directly from Product Form
 router.post('/colors', async (req, res) => {
     try {
-        const normalizeHex = (value) => {
-            if (!value) return ''
-            let h = String(value).trim().toLowerCase()
-            if (!h.startsWith('#')) h = `#${h}`
-            if (h.length === 4) {
-                h = `#${h[1]}${h[1]}${h[2]}${h[2]}${h[3]}${h[3]}`
-            }
-            return /^#[0-9a-f]{6}$/i.test(h) ? h : ''
-        }
-        const isHexLike = (value) => /^[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(String(value || ''))
-        const escapeRegex = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-        const titleCase = (value) =>
-            value ? value.charAt(0).toUpperCase() + value.slice(1) : ''
-        const familyFromHex = (hex) => {
-            const h = normalizeHex(hex)
-            if (!h) return ''
-            const r = parseInt(h.slice(1, 3), 16)
-            const g = parseInt(h.slice(3, 5), 16)
-            const b = parseInt(h.slice(5, 7), 16)
-            const max = Math.max(r, g, b)
-            const min = Math.min(r, g, b)
-            if (max < 40) return 'black'
-            if (min > 220) return 'white'
-            if (max - min < 20) return 'gray'
-            if (r >= g && r >= b) return g > 120 ? 'orange' : 'red'
-            if (g >= r && g >= b) return b > 140 ? 'teal' : 'green'
-            if (b >= r && b >= g) return r > 140 ? 'purple' : 'blue'
-            return ''
-        }
-        const HEX_NAME_MAP = {
-            '#000000': 'Midnight Black',
-            '#0f172a': 'Midnight',
-            '#111111': 'Jet Black',
-            '#1f2937': 'Charcoal',
-            '#374151': 'Graphite',
-            '#6b7280': 'Slate Gray',
-            '#9ca3af': 'Steel Gray',
-            '#d1d5db': 'Silver',
-            '#e5e7eb': 'Cloud',
-            '#f5f5f5': 'Soft White',
-            '#ffffff': 'Pure White',
-            '#ef4444': 'Crimson',
-            '#f97316': 'Tangerine',
-            '#f59e0b': 'Amber',
-            '#facc15': 'Gold',
-            '#22c55e': 'Emerald',
-            '#14b8a6': 'Teal',
-            '#3b82f6': 'Royal Blue',
-            '#6366f1': 'Indigo',
-            '#8b5cf6': 'Violet',
-            '#ec4899': 'Rose',
-            '#efeae6': 'Pearl White',
-            '#656b83': 'Slate Blue'
-        }
         const { name, hex, category } = req.body
         if (!hex || !category) {
             return res.status(400).json({ message: 'Hex and category are required' })
