@@ -76,8 +76,8 @@ const HEX_NAME_MAP = {
 
 // Add a new raw color directly from Product Form
 router.post('/colors', async (req, res) => {
+    const { name, hex, category } = req.body
     try {
-        const { name, hex, category } = req.body
         if (!hex || !category) {
             return res.status(400).json({ message: 'Hex and category are required' })
         }
