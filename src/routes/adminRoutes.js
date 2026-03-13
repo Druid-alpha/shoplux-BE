@@ -143,24 +143,10 @@ router.post('/colors', async (req, res) => {
             if (existingByHex) {
                 return res.status(200).json({ color: existingByHex })
             }
-            if (allowNameMatch) {
-                const existingByName = await Color.findOne({
-                    category: categoryId,
-                    name: new RegExp(`^${escapeRegex(resolvedName)}$`, 'i')
-                })
-                if (existingByName) {
-                    // Name collision with different hex: create a new color using hex as name.
-                    const created = await Color.create({
-                        name: normalizedHex.toUpperCase(),
-                        hex: normalizedHex,
-                        category: categoryId
-                    })
-                    return res.status(201).json({ color: created })
-                }
-            }
-            // Fallback: create with hex as name to bypass legacy name+category uniqueness.
+            // Legacy name+category uniqueness still present: create with unique readable name.
+            const uniqueName = `${resolvedName} ${normalizedHex.toUpperCase()}`.trim()
             const created = await Color.create({
-                name: normalizedHex.toUpperCase(),
+                name: uniqueName,
                 hex: normalizedHex,
                 category: categoryId
             })
