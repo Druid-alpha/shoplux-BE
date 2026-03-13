@@ -139,18 +139,32 @@ router.post('/colors', async (req, res) => {
                 }
                 categoryId = foundCategory._id
             }
-            const orConditions = [{ hex: normalizedHex }]
+            const existingByHex = await Color.findOne({ category: categoryId, hex: normalizedHex })
+            if (existingByHex) {
+                return res.status(200).json({ color: existingByHex })
+            }
             if (allowNameMatch) {
-                orConditions.push({ name: new RegExp(`^${escapeRegex(resolvedName)}$`, 'i') })
+                const existingByName = await Color.findOne({
+                    category: categoryId,
+                    name: new RegExp(`^${escapeRegex(resolvedName)}$`, 'i')
+                })
+                if (existingByName) {
+                    // Name collision with different hex: create a new color using hex as name.
+                    const created = await Color.create({
+                        name: normalizedHex.toUpperCase(),
+                        hex: normalizedHex,
+                        category: categoryId
+                    })
+                    return res.status(201).json({ color: created })
+                }
             }
-            const existing = await Color.findOne({
-                category: categoryId,
-                $or: orConditions
+            // Fallback: create with hex as name to bypass legacy name+category uniqueness.
+            const created = await Color.create({
+                name: normalizedHex.toUpperCase(),
+                hex: normalizedHex,
+                category: categoryId
             })
-            if (existing) {
-                return res.status(200).json({ color: existing })
-            }
-            return res.status(400).json({ message: 'This color already exists in this category.' })
+            return res.status(201).json({ color: created })
         }
         res.status(500).json({ message: 'Failed to create color', error: error.message })
     }
