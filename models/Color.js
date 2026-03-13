@@ -17,8 +17,8 @@ const colorSchema = new Schema(
   { timestamps: true }
 )
 
-// Prevent duplicate colors per category
-colorSchema.index({ name: 1, category: 1 }, { unique: true })
+// Prevent duplicate colors per category by hex
+colorSchema.index({ hex: 1, category: 1 }, { unique: true })
 
 const normalizeHex = (hex) => {
   if (!hex) return ''
