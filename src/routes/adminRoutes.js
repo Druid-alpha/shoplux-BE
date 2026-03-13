@@ -86,7 +86,8 @@ router.post('/colors', async (req, res) => {
             return res.status(400).json({ message: 'Invalid hex format' })
         }
         const inputName = String(name || '').trim()
-        const resolvedName = (inputName && !(inputName.startsWith('#') || isHexLike(inputName)))
+        const allowNameMatch = !!(inputName && !(inputName.startsWith('#') || isHexLike(inputName)))
+        const resolvedName = allowNameMatch
             ? inputName
             : (HEX_NAME_MAP[normalizedHex] || titleCase(familyFromHex(normalizedHex)) || normalizedHex.toUpperCase())
 
@@ -107,7 +108,7 @@ router.post('/colors', async (req, res) => {
             category: categoryId
         })
 
-        if (!color) {
+        if (!color && allowNameMatch) {
             color = await Color.findOne({
                 name: new RegExp(`^${escapeRegex(resolvedName)}$`, 'i'),
                 category: categoryId
@@ -123,7 +124,8 @@ router.post('/colors', async (req, res) => {
         if (error.code === 11000) {
             const normalizedHex = normalizeHex(hex)
             const inputName = String(name || '').trim()
-            const resolvedName = (inputName && !(inputName.startsWith('#') || isHexLike(inputName)))
+            const allowNameMatch = !!(inputName && !(inputName.startsWith('#') || isHexLike(inputName)))
+            const resolvedName = allowNameMatch
                 ? inputName
                 : (HEX_NAME_MAP[normalizedHex] || titleCase(familyFromHex(normalizedHex)) || normalizedHex.toUpperCase())
             let categoryId = category
@@ -136,12 +138,13 @@ router.post('/colors', async (req, res) => {
                 }
                 categoryId = foundCategory._id
             }
+            const orConditions = [{ hex: normalizedHex }]
+            if (allowNameMatch) {
+                orConditions.push({ name: new RegExp(`^${escapeRegex(resolvedName)}$`, 'i') })
+            }
             const existing = await Color.findOne({
                 category: categoryId,
-                $or: [
-                    { hex: normalizedHex },
-                    { name: new RegExp(`^${escapeRegex(resolvedName)}$`, 'i') }
-                ]
+                $or: orConditions
             })
             if (existing) {
                 return res.status(200).json({ color: existing })
