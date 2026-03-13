@@ -20,11 +20,6 @@ router.delete('/users/:id', adminCtrl.adminDeleteUser)
 // Add a new raw color directly from Product Form
 router.post('/colors', async (req, res) => {
     try {
-        const { name, hex, category } = req.body
-        if (!name || !hex || !category) {
-            return res.status(400).json({ message: 'Name, hex, and category are required' })
-        }
-
         const normalizeHex = (value) => {
             if (!value) return ''
             let h = String(value).trim().toLowerCase()
@@ -35,10 +30,16 @@ router.post('/colors', async (req, res) => {
             return /^#[0-9a-f]{6}$/i.test(h) ? h : ''
         }
         const escapeRegex = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        const { name, hex, category } = req.body
+        if (!hex || !category) {
+            return res.status(400).json({ message: 'Hex and category are required' })
+        }
+
         const normalizedHex = normalizeHex(hex)
         if (!normalizedHex) {
             return res.status(400).json({ message: 'Invalid hex format' })
         }
+        const resolvedName = String(name || '').trim() || normalizedHex.toUpperCase()
 
         // Check if exact color exists for this category to avoid duplicates
         let color = await Color.findOne({
@@ -48,24 +49,25 @@ router.post('/colors', async (req, res) => {
 
         if (!color) {
             color = await Color.findOne({
-                name: new RegExp(`^${escapeRegex(name)}$`, 'i'),
+                name: new RegExp(`^${escapeRegex(resolvedName)}$`, 'i'),
                 category
             })
         }
 
         if (!color) {
-            color = await Color.create({ name, hex: normalizedHex, category })
+            color = await Color.create({ name: resolvedName, hex: normalizedHex, category })
         }
 
         res.status(201).json({ color })
     } catch (error) {
         if (error.code === 11000) {
             const normalizedHex = normalizeHex(hex)
+            const resolvedName = String(name || '').trim() || normalizedHex.toUpperCase()
             const existing = await Color.findOne({
                 category,
                 $or: [
                     { hex: normalizedHex },
-                    { name: new RegExp(`^${escapeRegex(name)}$`, 'i') }
+                    { name: new RegExp(`^${escapeRegex(resolvedName)}$`, 'i') }
                 ]
             })
             if (existing) {
