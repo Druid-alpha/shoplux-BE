@@ -1,6 +1,8 @@
+const mongoose = require('mongoose')
 const Order = require('../../models/order')
 const User = require('../../models/user')
 const Product = require('../../models/product')
+const Color = require('../../models/Color')
 const path = require('path')
 const fs = require('fs')
 const os = require('os')
@@ -33,6 +35,28 @@ function getVersionFromUrl(url) {
   const match = String(url).match(/\/v(\d+)\//)
   return match ? Number(match[1]) : null
 }
+
+const resolveColorLabel = (() => {
+  const cache = new Map()
+  return async (raw) => {
+    if (!raw) return null
+    if (typeof raw === 'object') {
+      if (raw.name) return raw.name
+      if (raw.hex) return raw.hex
+      if (raw._id) raw = raw._id
+      else return null
+    }
+    const key = String(raw)
+    if (mongoose.Types.ObjectId.isValid(key)) {
+      if (cache.has(key)) return cache.get(key)
+      const c = await Color.findById(key).select('name hex').lean()
+      const label = c?.name || c?.hex || key
+      cache.set(key, label)
+      return label
+    }
+    return key
+  }
+})()
 
 
 exports.createOrder = async (req, res) => {
@@ -88,13 +112,14 @@ exports.createOrder = async (req, res) => {
         price = variantDiscount > 0
           ? variant.price * (1 - variantDiscount / 100)
           : variant.price
+        const colorLabel = await resolveColorLabel(variant.options?.color || cartVariantColor)
         variantData = {
           _id: variant._id,
           sku: variant.sku,
           price: variant.price,
           discount: variantDiscount,
           size: variant.options?.size || cartVariantSize || null,
-          color: variant.options?.color?.name || variant.options?.color?._id || cartVariantColor || null
+          color: colorLabel || null
         }
 
       } else {
@@ -102,9 +127,10 @@ exports.createOrder = async (req, res) => {
           throw new Error('Insufficient product stock')
         }
         if (cartVariantSize || cartVariantColor) {
+          const colorLabel = await resolveColorLabel(cartVariantColor)
           variantData = {
             size: cartVariantSize || null,
-            color: cartVariantColor || null
+            color: colorLabel || null
           }
         }
       }

@@ -128,19 +128,25 @@ exports.verifyPaystackPayment = async (req, res) => {
           if (result.modifiedCount > 0) variantUpdated = true
         }
 
+        if (!variantUpdated && item.variant?.sku) {
+          const result = await Product.updateOne(
+            {
+              _id: product._id,
+              "variants.sku": item.variant.sku,
+              "variants.stock": { $gte: item.qty }
+            },
+            { $inc: { "variants.$.stock": -item.qty } },
+            { session }
+          )
+          if (result.modifiedCount > 0) variantUpdated = true
+        }
+
         if (!variantUpdated) {
           await Product.updateOne(
             { _id: product._id, stock: { $gte: item.qty } },
             { $inc: { stock: -item.qty } },
             { session }
           )
-        }
-
-        // Resync total stock
-        const updated = await Product.findById(product._id).session(session)
-        if (updated?.variants?.length) {
-          updated.stock = updated.variants.reduce((s, v) => s + (v.stock || 0), 0)
-          await updated.save({ session })
         }
       }
 
@@ -240,6 +246,20 @@ exports.paystackWebHook = async (req, res) => {
         variantUpdated = true
       }
 
+      if (!variantUpdated && item.variant?.sku) {
+        const result = await Product.updateOne(
+          {
+            _id: product._id,
+            "variants.sku": item.variant.sku,
+            "variants.stock": { $gte: item.qty }
+          },
+          { $inc: { "variants.$.stock": -item.qty } },
+          { session }
+        )
+        if (result.modifiedCount === 0) throw new Error("Stock conflict (variant sold out)")
+        variantUpdated = true
+      }
+
       if (!variantUpdated) {
         const result = await Product.updateOne(
           { _id: product._id, stock: { $gte: item.qty } },
@@ -247,12 +267,6 @@ exports.paystackWebHook = async (req, res) => {
           { session }
         )
         if (result.modifiedCount === 0) throw new Error("Stock conflict (product sold out)")
-      }
-
-      const updatedProduct = await Product.findById(product._id).session(session)
-      if (updatedProduct?.variants?.length) {
-        updatedProduct.stock = updatedProduct.variants.reduce((sum, v) => sum + (v.stock || 0), 0)
-        await updatedProduct.save({ session })
       }
     }
 
@@ -338,8 +352,28 @@ async function generateInvoice(order) {
   doc.font('Helvetica')
   doc.text('------------------------------------------------------------------')
 
+  const normalizeColorLabel = (raw) => {
+    if (!raw) return ''
+    if (typeof raw === 'object') {
+      if (raw.name) return raw.name
+      if (raw.hex) return raw.hex
+    }
+    return String(raw)
+  }
+
+  const sizeLabelForItem = (item) => {
+    const type = String(item?.clothingType || '').toLowerCase()
+    if (['clothes', 'shoes', 'bags', 'bag', 'eyeglass'].includes(type)) return 'Size'
+    return 'Spec'
+  }
+
   order.items.forEach((item, i) => {
-    const variantInfo = item.variant?.sku ? ` [${item.variant.sku}]` : ''
+    const variantParts = []
+    if (item.variant?.sku) variantParts.push(`SKU ${item.variant.sku}`)
+    const colorLabel = normalizeColorLabel(item.variant?.color)
+    if (colorLabel) variantParts.push(`Color ${colorLabel}`)
+    if (item.variant?.size) variantParts.push(`${sizeLabelForItem(item)} ${item.variant.size}`)
+    const variantInfo = variantParts.length > 0 ? ` [${variantParts.join(' | ')}]` : ''
     const itemName = item.title || 'Product'
     const lineTotal = (item.priceAtPurchase || 0) * item.qty
     doc.font('Helvetica-Bold').text(`${i + 1}. ${itemName}${variantInfo}`)

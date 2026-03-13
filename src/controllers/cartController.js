@@ -5,6 +5,30 @@ const Color = require('../../models/Color');
 
 const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(value);
 
+const colorKey = (value) => {
+  if (!value) return "";
+  if (typeof value === "object") {
+    return String(value._id || value.name || value.hex || "");
+  }
+  return String(value);
+};
+
+const normalizeVariant = (variant) => {
+  if (!variant) return { sku: "", size: "", color: "", empty: true };
+  if (typeof variant === "string") {
+    const sku = String(variant || "");
+    return { sku, size: "", color: "", empty: !sku };
+  }
+  if (typeof variant === "object") {
+    const sku = String(variant.sku || "");
+    const size = String(variant.size || "");
+    const color = colorKey(variant.color);
+    const empty = !(sku || size || color);
+    return { sku, size, color, empty };
+  }
+  return { sku: "", size: "", color: "", empty: true };
+};
+
 const attachColorMeta = async (cart = []) => {
   const ids = new Set();
   cart.forEach(item => {
@@ -73,9 +97,10 @@ exports.getCart = async (req, res) => {
 exports.addToCart = async (req, res) => {
   try {
     const { productId, qty = 1, variant = null } = req.body;
-    const variantSku = typeof variant === 'string' ? variant : variant?.sku || null;
-    const variantSize = typeof variant === 'object' ? (variant?.size || null) : null;
-    const variantColor = typeof variant === 'object' ? (variant?.color || null) : null;
+    const reqVariant = normalizeVariant(variant);
+    const variantSku = reqVariant.sku || null;
+    const variantSize = reqVariant.size || null;
+    const variantColor = reqVariant.color || null;
 
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ message: 'User not found' });
@@ -93,17 +118,14 @@ exports.addToCart = async (req, res) => {
       const cartProdId = String(i.product);
       const reqProdId = String(productId);
 
-      const cartVariantSku = String(i.variant?.sku || "");
-      const reqVariantSku = String(variantSku || "");
-      const cartVariantSize = String(i.variant?.size || "");
-      const reqVariantSize = String(variantSize || "");
-      const cartVariantColor = String(i.variant?.color || "");
-      const reqVariantColor = String(variantColor || "");
-
-      if (reqVariantSku) {
-        return cartProdId === reqProdId && cartVariantSku === reqVariantSku;
+      const cartVariant = normalizeVariant(i.variant);
+      if (reqVariant.sku) {
+        return cartProdId === reqProdId && cartVariant.sku === reqVariant.sku;
       }
-      return cartProdId === reqProdId && cartVariantSize === reqVariantSize && cartVariantColor === reqVariantColor;
+      const isReqEmpty = !reqVariant.size && !reqVariant.color;
+      const isCartColorOnly = !cartVariant.sku && !cartVariant.size && !!cartVariant.color;
+      if (isReqEmpty && isCartColorOnly) return cartProdId === reqProdId;
+      return cartProdId === reqProdId && cartVariant.size === reqVariant.size && cartVariant.color === reqVariant.color;
     });
 
     // Resolve stock limit (Variant vs Base)
@@ -117,7 +139,7 @@ exports.addToCart = async (req, res) => {
       // increment qty safely
       user.cart[idx].qty = Math.min(stockLimit, user.cart[idx].qty + Number(qty));
     } else {
-      let variantPayload = {};
+      let variantPayload = null;
       if (variantSku) {
         const vObj = product.variants.find(v => v.sku === String(variantSku));
         variantPayload = {
@@ -162,9 +184,10 @@ exports.addToCart = async (req, res) => {
 exports.updateItem = async (req, res) => {
   try {
     const { productId, qty, variant = null } = req.body;
-    const variantSku = typeof variant === 'string' ? variant : variant?.sku || null;
-    const variantSize = typeof variant === 'object' ? (variant?.size || null) : null;
-    const variantColor = typeof variant === 'object' ? (variant?.color || null) : null;
+    const reqVariant = normalizeVariant(variant);
+    const variantSku = reqVariant.sku || null;
+    const variantSize = reqVariant.size || null;
+    const variantColor = reqVariant.color || null;
 
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ message: 'User not found' });
@@ -173,16 +196,14 @@ exports.updateItem = async (req, res) => {
     const idx = user.cart.findIndex(i => {
       const cartProdId = String(i.product);
       const reqProdId = String(productId);
-      const cartVariantSku = String(i.variant?.sku || "");
-      const reqVariantSku = String(variantSku || "");
-      const cartVariantSize = String(i.variant?.size || "");
-      const reqVariantSize = String(variantSize || "");
-      const cartVariantColor = String(i.variant?.color || "");
-      const reqVariantColor = String(variantColor || "");
-      if (reqVariantSku) {
-        return cartProdId === reqProdId && cartVariantSku === reqVariantSku;
+      const cartVariant = normalizeVariant(i.variant);
+      if (reqVariant.sku) {
+        return cartProdId === reqProdId && cartVariant.sku === reqVariant.sku;
       }
-      return cartProdId === reqProdId && cartVariantSize === reqVariantSize && cartVariantColor === reqVariantColor;
+      const isReqEmpty = !reqVariant.size && !reqVariant.color;
+      const isCartColorOnly = !cartVariant.sku && !cartVariant.size && !!cartVariant.color;
+      if (isReqEmpty && isCartColorOnly) return cartProdId === reqProdId;
+      return cartProdId === reqProdId && cartVariant.size === reqVariant.size && cartVariant.color === reqVariant.color;
     });
 
     if (idx === -1)
@@ -222,25 +243,20 @@ exports.updateItem = async (req, res) => {
 exports.removeItem = async (req, res) => {
   try {
     const { productId, variant = null } = req.body;
-    const variantSku = typeof variant === 'string' ? variant : variant?.sku || null;
-    const variantSize = typeof variant === 'object' ? (variant?.size || null) : null;
-    const variantColor = typeof variant === 'object' ? (variant?.color || null) : null;
-
-    // Use a more inclusive pull query to handle both null and empty variant objects
-    const variantSkuStr = String(variantSku || "");
-    const variantSizeStr = String(variantSize || "");
-    const variantColorStr = String(variantColor || "");
+    const reqVariant = normalizeVariant(variant);
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ message: 'User not found' });
 
     user.cart = user.cart.filter(i => {
       const isSameProd = String(i.product) === String(productId);
-      const cartVariantSku = String(i.variant?.sku || "");
-      const cartVariantSize = String(i.variant?.size || "");
-      const cartVariantColor = String(i.variant?.color || "");
-      const isSameVariant = variantSkuStr
-        ? cartVariantSku === variantSkuStr
-        : cartVariantSize === variantSizeStr && cartVariantColor === variantColorStr;
+      const cartVariant = normalizeVariant(i.variant);
+      const isReqEmpty = !reqVariant.sku && !reqVariant.size && !reqVariant.color;
+      const isCartColorOnly = !cartVariant.sku && !cartVariant.size && !!cartVariant.color;
+      const isSameVariant = reqVariant.sku
+        ? cartVariant.sku === reqVariant.sku
+        : (isReqEmpty && isCartColorOnly)
+          ? true
+          : (cartVariant.size === reqVariant.size && cartVariant.color === reqVariant.color);
       return !(isSameProd && isSameVariant);
     });
 
@@ -284,9 +300,10 @@ exports.syncCart = async (req, res) => {
       const productId = item.product || item.productId
       const qty = Number(item.qty) || 1
       const variantPayload = item.variant || null
-      const variantSku = typeof variantPayload === 'string' ? variantPayload : variantPayload?.sku || null
-      const variantSize = typeof variantPayload === 'object' ? (variantPayload?.size || null) : null
-      const variantColor = typeof variantPayload === 'object' ? (variantPayload?.color || null) : null
+      const reqVariant = normalizeVariant(variantPayload)
+      const variantSku = reqVariant.sku || null
+      const variantSize = reqVariant.size || null
+      const variantColor = reqVariant.color || null
 
       const product = await Product.findById(productId)
       if (!product) continue
@@ -295,18 +312,14 @@ exports.syncCart = async (req, res) => {
       const idx = user.cart.findIndex(i => {
         const cartProdId = String(i.product)
         const reqProdId = String(productId)
-
-        const cartVariantSku = String(i.variant?.sku || "")
-        const reqVariantSku = String(variantSku || "")
-        const cartVariantSize = String(i.variant?.size || "")
-        const reqVariantSize = String(variantSize || "")
-        const cartVariantColor = String(i.variant?.color || "")
-        const reqVariantColor = String(variantColor || "")
-
-        if (reqVariantSku) {
-          return cartProdId === reqProdId && cartVariantSku === reqVariantSku
+        const cartVariant = normalizeVariant(i.variant)
+        if (reqVariant.sku) {
+          return cartProdId === reqProdId && cartVariant.sku === reqVariant.sku
         }
-        return cartProdId === reqProdId && cartVariantSize === reqVariantSize && cartVariantColor === reqVariantColor
+        const isReqEmpty = !reqVariant.size && !reqVariant.color
+        const isCartColorOnly = !cartVariant.sku && !cartVariant.size && !!cartVariant.color
+        if (isReqEmpty && isCartColorOnly) return cartProdId === reqProdId
+        return cartProdId === reqProdId && cartVariant.size === reqVariant.size && cartVariant.color === reqVariant.color
       })
 
       // Resolve stock
@@ -322,7 +335,7 @@ exports.syncCart = async (req, res) => {
           user.cart[idx].qty + qty
         )
       } else {
-        let variantPayloadToSave = {}
+        let variantPayloadToSave = null
         if (variantSku) {
           const vObj = product.variants.find(v => v.sku === String(variantSku))
           variantPayloadToSave = {
