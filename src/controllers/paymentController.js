@@ -14,6 +14,18 @@ const { clampReservedToZero, releaseOrderReservations } = require('../utils/rese
 
 const PAYMENT_RESERVATION_EXTENSION_MS = 10 * 60 * 1000
 
+const findVariantByOptions = (product, size, color) => {
+  if (!product?.variants?.length) return null
+  const sizeKey = String(size || '')
+  const colorKey = color ? String(color._id || color) : ''
+  return product.variants.find(v => {
+    const vSize = String(v?.options?.size || '')
+    const vColor = String(v?.options?.color?._id || v?.options?.color || '')
+    const sizeMatch = sizeKey ? vSize === sizeKey : true
+    const colorMatch = colorKey ? vColor === colorKey : true
+    return sizeMatch && colorMatch
+  }) || null
+}
 
 /* ================================================================
    INIT — Create Paystack transaction for a pending order
@@ -54,6 +66,7 @@ exports.initPaystackTransaction = async (req, res) => {
         let reserved = false
         const hasVariant = Array.isArray(product?.variants) && product.variants.length > 0
           && !!(item.variant?._id || item.variant?.sku || item.variant?.size || item.variant?.color)
+        const allowBaseFallback = !item.variant?._id && !item.variant?.sku
 
         if (item.variant?._id) {
           const result = await Product.updateOne(
@@ -84,8 +97,27 @@ exports.initPaystackTransaction = async (req, res) => {
           if (result.modifiedCount > 0) reserved = true
         }
 
+        if (!reserved && (item.variant?.size || item.variant?.color)) {
+          const resolved = findVariantByOptions(product, item.variant.size, item.variant.color)
+          if (resolved?._id) {
+            const result = await Product.updateOne(
+              {
+                _id: product._id,
+                "variants._id": resolved._id,
+                "variants.stock": { $gte: item.qty },
+                "variants.reserved": { $lte: (resolved?.stock || 0) - item.qty }
+              },
+              { $inc: { "variants.$.reserved": item.qty } },
+              { session: reserveSession }
+            )
+            if (result.modifiedCount > 0) reserved = true
+          }
+        }
+
         if (!reserved && hasVariant) {
-          throw new Error('Variant not found or insufficient stock')
+          if (!allowBaseFallback || Number(product.stock || 0) < item.qty) {
+            throw new Error('Variant not found or insufficient stock')
+          }
         }
 
         if (!reserved) {
@@ -221,6 +253,7 @@ exports.verifyPaystackPayment = async (req, res) => {
         let variantUpdated = false
         const hasVariant = Array.isArray(product?.variants) && product.variants.length > 0
           && !!(item.variant?._id || item.variant?.sku || item.variant?.size || item.variant?.color)
+        const allowBaseFallback = !item.variant?._id && !item.variant?.sku
 
         if (item.variant?._id) {
           const result = await Product.updateOne(
@@ -248,8 +281,26 @@ exports.verifyPaystackPayment = async (req, res) => {
           if (result.modifiedCount > 0) variantUpdated = true
         }
 
+        if (!variantUpdated && (item.variant?.size || item.variant?.color)) {
+          const resolved = findVariantByOptions(product, item.variant.size, item.variant.color)
+          if (resolved?._id) {
+            const result = await Product.updateOne(
+              {
+                _id: product._id,
+                "variants._id": resolved._id,
+                "variants.stock": { $gte: item.qty }
+              },
+              { $inc: { "variants.$.stock": -item.qty, "variants.$.reserved": -item.qty } },
+              { session }
+            )
+            if (result.modifiedCount > 0) variantUpdated = true
+          }
+        }
+
         if (!variantUpdated && hasVariant) {
-          throw new Error('Variant not found or insufficient stock')
+          if (!allowBaseFallback || Number(product.stock || 0) < item.qty) {
+            throw new Error('Variant not found or insufficient stock')
+          }
         }
 
         if (!variantUpdated) {
@@ -357,6 +408,7 @@ exports.paystackWebHook = async (req, res) => {
       let variantUpdated = false
       const hasVariant = Array.isArray(product?.variants) && product.variants.length > 0
         && !!(item.variant?._id || item.variant?.sku || item.variant?.size || item.variant?.color)
+      const allowBaseFallback = !item.variant?._id && !item.variant?.sku
 
         if (item.variant?._id) {
           const result = await Product.updateOne(
@@ -386,8 +438,27 @@ exports.paystackWebHook = async (req, res) => {
           variantUpdated = true
         }
 
+        if (!variantUpdated && (item.variant?.size || item.variant?.color)) {
+          const resolved = findVariantByOptions(product, item.variant.size, item.variant.color)
+          if (resolved?._id) {
+            const result = await Product.updateOne(
+              {
+                _id: product._id,
+                "variants._id": resolved._id,
+                "variants.stock": { $gte: item.qty }
+              },
+              { $inc: { "variants.$.stock": -item.qty, "variants.$.reserved": -item.qty } },
+              { session }
+            )
+            if (result.modifiedCount === 0) throw new Error("Stock conflict (variant sold out)")
+            variantUpdated = true
+          }
+        }
+
         if (!variantUpdated && hasVariant) {
-          throw new Error("Variant not found or insufficient stock")
+          if (!allowBaseFallback || Number(product.stock || 0) < item.qty) {
+            throw new Error("Variant not found or insufficient stock")
+          }
         }
 
         if (!variantUpdated) {
