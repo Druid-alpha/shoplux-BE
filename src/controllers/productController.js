@@ -9,6 +9,15 @@ const Color = require('../../models/Color')
 const { uploadToCloudinary } = require('../middleware/uploadMiddleware')
 const { runOrderReservationCleanupOnce } = require('../jobs/orderReservationCleanupJob')
 
+const findDuplicateSkus = (variants = []) => {
+  const counts = new Map()
+  variants.forEach(v => {
+    const sku = String(v?.sku || '').trim()
+    if (!sku) return
+    counts.set(sku, (counts.get(sku) || 0) + 1)
+  })
+  return Array.from(counts.entries()).filter(([, count]) => count > 1).map(([sku]) => sku)
+}
 /* =====================================================
    HELPERS
 ===================================================== */
@@ -982,6 +991,12 @@ exports.createProduct = async (req, res) => {
       }
     }
     if (data.variants?.length > 0) {
+      const duplicateSkus = findDuplicateSkus(data.variants)
+      if (duplicateSkus.length > 0) {
+        return res.status(400).json({
+          message: `Duplicate variant SKU(s) found: ${duplicateSkus.join(', ')}`
+        })
+      }
       data.stock = 0
     }
 
@@ -1259,6 +1274,12 @@ exports.updateProduct = async (req, res) => {
        VARIANTS
     ======================= */
     if (Array.isArray(payload.variants)) {
+      const duplicateSkus = findDuplicateSkus(payload.variants)
+      if (duplicateSkus.length > 0) {
+        return res.status(400).json({
+          message: `Duplicate variant SKU(s) found: ${duplicateSkus.join(', ')}`
+        })
+      }
       const existingVariants = existingProduct.variants || []
 
       const updatedVariants = await Promise.all(
@@ -1345,6 +1366,13 @@ exports.updateVariants = async (req, res) => {
     const product = await Product.findById(id)
     if (!product) {
       return res.status(404).json({ message: 'Product not found' })
+    }
+
+    const duplicateSkus = findDuplicateSkus(payload.variants)
+    if (duplicateSkus.length > 0) {
+      return res.status(400).json({
+        message: `Duplicate variant SKU(s) found: ${duplicateSkus.join(', ')}`
+      })
     }
 
     const updatedVariants = await Promise.all(

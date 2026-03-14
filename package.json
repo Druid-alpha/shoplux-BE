@@ -9,7 +9,9 @@
     "test": "node --test",
     "start": "node index.js",
     "dev": "nodemon index.js",
-    "migrate:sizes": "node migrateProductSizes.js"
+    "migrate:sizes": "node migrateProductSizes.js",
+    "fix:variant-skus": "node scripts/fixDuplicateVariantSkus.js",
+    "scan:variant-skus": "node scripts/scanDuplicateVariantSkus.js"
   },
   "keywords": [],
   "author": "",

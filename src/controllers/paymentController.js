@@ -52,6 +52,7 @@ exports.initPaystackTransaction = async (req, res) => {
         if (!product) continue
 
         let reserved = false
+        const hasVariant = !!(item.variant?._id || item.variant?.sku || item.variant?.size || item.variant?.color)
 
         if (item.variant?._id) {
           const result = await Product.updateOne(
@@ -80,6 +81,10 @@ exports.initPaystackTransaction = async (req, res) => {
             { session: reserveSession }
           )
           if (result.modifiedCount > 0) reserved = true
+        }
+
+        if (!reserved && hasVariant) {
+          throw new Error('Variant not found or insufficient stock')
         }
 
         if (!reserved) {
@@ -213,6 +218,7 @@ exports.verifyPaystackPayment = async (req, res) => {
         if (!product) continue
 
         let variantUpdated = false
+        const hasVariant = !!(item.variant?._id || item.variant?.sku || item.variant?.size || item.variant?.color)
 
         if (item.variant?._id) {
           const result = await Product.updateOne(
@@ -238,6 +244,10 @@ exports.verifyPaystackPayment = async (req, res) => {
             { session }
           )
           if (result.modifiedCount > 0) variantUpdated = true
+        }
+
+        if (!variantUpdated && hasVariant) {
+          throw new Error('Variant not found or insufficient stock')
         }
 
         if (!variantUpdated) {
@@ -343,6 +353,7 @@ exports.paystackWebHook = async (req, res) => {
       if (!product) continue
 
       let variantUpdated = false
+      const hasVariant = !!(item.variant?._id || item.variant?.sku || item.variant?.size || item.variant?.color)
 
         if (item.variant?._id) {
           const result = await Product.updateOne(
@@ -370,6 +381,10 @@ exports.paystackWebHook = async (req, res) => {
           )
           if (result.modifiedCount === 0) throw new Error("Stock conflict (variant sold out)")
           variantUpdated = true
+        }
+
+        if (!variantUpdated && hasVariant) {
+          throw new Error("Variant not found or insufficient stock")
         }
 
         if (!variantUpdated) {

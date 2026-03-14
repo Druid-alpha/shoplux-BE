@@ -31,6 +31,22 @@ const normalizeVariant = (variant) => {
   return { _id: "", sku: "", size: "", color: "", empty: true };
 };
 
+const findVariantByOptions = (product, size, color) => {
+  if (!product?.variants?.length) return null
+  const sizeKey = String(size || '')
+  const colorKey = color
+    ? String(color._id || color)
+    : ''
+  const match = product.variants.find(v => {
+    const vSize = String(v?.options?.size || '')
+    const vColor = String(v?.options?.color?._id || v?.options?.color || '')
+    const sizeMatch = sizeKey ? vSize === sizeKey : true
+    const colorMatch = colorKey ? vColor === colorKey : true
+    return sizeMatch && colorMatch
+  })
+  return match || null
+}
+
 const attachColorMeta = async (cart = []) => {
   const ids = new Set();
   cart.forEach(item => {
@@ -100,8 +116,8 @@ exports.addToCart = async (req, res) => {
   try {
     const { productId, qty = 1, variant = null } = req.body;
     const reqVariant = normalizeVariant(variant);
-    const variantId = reqVariant._id || null;
-    const variantSku = reqVariant.sku || null;
+    let variantId = reqVariant._id || null;
+    let variantSku = reqVariant.sku || null;
     const variantSize = reqVariant.size || null;
     const variantColor = reqVariant.color || null;
 
@@ -143,6 +159,13 @@ exports.addToCart = async (req, res) => {
     if (!vObj && variantSku) {
       vObj = product.variants.find(v => v.sku === String(variantSku));
     }
+    if (!vObj && (variantSize || variantColor) && product.variants?.length) {
+      vObj = findVariantByOptions(product, variantSize, variantColor)
+      if (vObj) {
+        variantId = vObj._id || variantId
+        variantSku = vObj.sku || variantSku
+      }
+    }
     if (vObj) stockLimit = vObj.stock;
 
     if (idx >= 0) {
@@ -163,10 +186,20 @@ exports.addToCart = async (req, res) => {
           color: vObj?.options?.color?._id || vObj?.options?.color || variantColor || undefined
         };
       } else if (variantSize || variantColor) {
-        variantPayload = {
-          size: variantSize || undefined,
-          color: variantColor || undefined
-        };
+        const resolved = vObj || findVariantByOptions(product, variantSize, variantColor)
+        if (resolved) {
+          variantPayload = {
+            _id: resolved._id || undefined,
+            sku: resolved.sku || undefined,
+            size: resolved.options?.size || variantSize || undefined,
+            color: resolved.options?.color?._id || resolved.options?.color || variantColor || undefined
+          }
+        } else {
+          variantPayload = {
+            size: variantSize || undefined,
+            color: variantColor || undefined
+          }
+        }
       }
       // add new item
       user.cart.push({
@@ -200,8 +233,8 @@ exports.updateItem = async (req, res) => {
   try {
     const { productId, qty, variant = null } = req.body;
     const reqVariant = normalizeVariant(variant);
-    const variantId = reqVariant._id || null;
-    const variantSku = reqVariant.sku || null;
+    let variantId = reqVariant._id || null;
+    let variantSku = reqVariant.sku || null;
     const variantSize = reqVariant.size || null;
     const variantColor = reqVariant.color || null;
 
@@ -240,9 +273,24 @@ exports.updateItem = async (req, res) => {
     if (!vObj && variantSku) {
       vObj = product.variants.find(v => v.sku === String(variantSku));
     }
+    if (!vObj && (variantSize || variantColor) && product.variants?.length) {
+      vObj = findVariantByOptions(product, variantSize, variantColor)
+      if (vObj) {
+        variantId = vObj._id || variantId
+        variantSku = vObj.sku || variantSku
+      }
+    }
     if (vObj) stockLimit = vObj.stock;
 
     user.cart[idx].qty = Math.min(Math.max(1, qty), stockLimit);
+    if ((variantSize || variantColor) && vObj) {
+      user.cart[idx].variant = {
+        _id: vObj._id || variantId || undefined,
+        sku: vObj.sku || variantSku || undefined,
+        size: vObj.options?.size || variantSize || undefined,
+        color: vObj.options?.color?._id || vObj.options?.color || variantColor || undefined
+      }
+    }
 
     await user.save();
     await user.populate({
@@ -326,8 +374,8 @@ exports.syncCart = async (req, res) => {
       const qty = Number(item.qty) || 1
       const variantPayload = item.variant || null
       const reqVariant = normalizeVariant(variantPayload)
-      const variantId = reqVariant._id || null
-      const variantSku = reqVariant.sku || null
+      let variantId = reqVariant._id || null
+      let variantSku = reqVariant.sku || null
       const variantSize = reqVariant.size || null
       const variantColor = reqVariant.color || null
 
@@ -360,6 +408,13 @@ exports.syncCart = async (req, res) => {
       if (!vObj && variantSku) {
         vObj = product.variants.find(v => v.sku === String(variantSku))
       }
+      if (!vObj && (variantSize || variantColor) && product.variants?.length) {
+        vObj = findVariantByOptions(product, variantSize, variantColor)
+        if (vObj) {
+          variantId = vObj._id || variantId
+          variantSku = vObj.sku || variantSku
+        }
+      }
       if (vObj) stockLimit = vObj.stock
 
       if (idx >= 0) {
@@ -382,9 +437,19 @@ exports.syncCart = async (req, res) => {
             color: vObj?.options?.color?._id || vObj?.options?.color || variantColor || undefined
           }
         } else if (variantSize || variantColor) {
-          variantPayloadToSave = {
-            size: variantSize || undefined,
-            color: variantColor || undefined
+          const resolved = vObj || findVariantByOptions(product, variantSize, variantColor)
+          if (resolved) {
+            variantPayloadToSave = {
+              _id: resolved._id || undefined,
+              sku: resolved.sku || undefined,
+              size: resolved.options?.size || variantSize || undefined,
+              color: resolved.options?.color?._id || resolved.options?.color || variantColor || undefined
+            }
+          } else {
+            variantPayloadToSave = {
+              size: variantSize || undefined,
+              color: variantColor || undefined
+            }
           }
         }
         user.cart.push({
