@@ -58,6 +58,26 @@ const resolveColorLabel = (() => {
   }
 })()
 
+const colorKey = (value) => {
+  if (!value) return ''
+  if (typeof value === 'object') {
+    return String(value._id || value.name || value.hex || '')
+  }
+  return String(value)
+}
+
+const findVariantByOptions = (product, size, color) => {
+  if (!product?.variants?.length) return null
+  const sizeKey = String(size || '')
+  const colorKeyValue = colorKey(color)
+  if (!sizeKey && !colorKeyValue) return null
+  return product.variants.find(v => {
+    const vSize = String(v?.options?.size || '')
+    const vColor = colorKey(v?.options?.color)
+    return vSize === sizeKey && vColor === colorKeyValue
+  }) || null
+}
+
 
 exports.createOrder = async (req, res) => {
   try {
