@@ -12,7 +12,7 @@ const cloudinary = require('../config/cloudinary')
 const sendEmail = require('../utils/sendEmail')
 const { clampReservedToZero, releaseOrderReservations } = require('../utils/reservation')
 
-const PAYMENT_RESERVATION_EXTENSION_MS = 15 * 60 * 1000
+const PAYMENT_RESERVATION_EXTENSION_MS = 10 * 60 * 1000
 
 
 /* ================================================================
@@ -43,6 +43,79 @@ exports.initPaystackTransaction = async (req, res) => {
 
     const reference = `ORD_${order._id}_${Date.now()}`
 
+    // Reserve stock only when payment is initiated.
+    const reserveSession = await mongoose.startSession()
+    reserveSession.startTransaction()
+    try {
+      for (const item of order.items) {
+        const product = await Product.findById(item.product).session(reserveSession)
+        if (!product) continue
+
+        let reserved = false
+
+        if (item.variant?._id) {
+          const result = await Product.updateOne(
+            {
+              _id: product._id,
+              "variants._id": item.variant._id,
+              "variants.stock": { $gte: item.qty },
+              "variants.reserved": { $lte: (product.variants.id(item.variant._id)?.stock || 0) - item.qty }
+            },
+            { $inc: { "variants.$.reserved": item.qty } },
+            { session: reserveSession }
+          )
+          if (result.modifiedCount > 0) reserved = true
+        }
+
+        if (!reserved && item.variant?.sku) {
+          const variant = product.variants.find(v => v.sku === item.variant.sku)
+          const result = await Product.updateOne(
+            {
+              _id: product._id,
+              "variants.sku": item.variant.sku,
+              "variants.stock": { $gte: item.qty },
+              "variants.reserved": { $lte: (variant?.stock || 0) - item.qty }
+            },
+            { $inc: { "variants.$.reserved": item.qty } },
+            { session: reserveSession }
+          )
+          if (result.modifiedCount > 0) reserved = true
+        }
+
+        if (!reserved) {
+          const result = await Product.updateOne(
+            {
+              _id: product._id,
+              stock: { $gte: item.qty },
+              reserved: { $lte: (product.stock - item.qty) }
+            },
+            { $inc: { reserved: item.qty } },
+            { session: reserveSession }
+          )
+          if (result.modifiedCount === 0) {
+            throw new Error('Insufficient product stock')
+          }
+        }
+
+        await clampReservedToZero(product._id, reserveSession)
+      }
+
+      order.paymentRef = reference
+      order.expiresAt = new Date(Date.now() + PAYMENT_RESERVATION_EXTENSION_MS)
+      await order.save({ session: reserveSession })
+
+      await reserveSession.commitTransaction()
+    } catch (reserveErr) {
+      await reserveSession.abortTransaction()
+      reserveSession.endSession()
+      if (String(reserveErr.message || '').toLowerCase().includes('insufficient')) {
+        return res.status(409).json({ message: reserveErr.message })
+      }
+      return res.status(500).json({ message: reserveErr.message || 'Failed to reserve stock' })
+    } finally {
+      reserveSession.endSession()
+    }
+
     const response = await paystack.post("/transaction/initialize", {
       email: order.user.email,
       amount: Math.round(order.totalAmount * 100),
@@ -54,10 +127,6 @@ exports.initPaystackTransaction = async (req, res) => {
       }
     })
 
-    order.paymentRef = reference
-    order.expiresAt = new Date(Date.now() + PAYMENT_RESERVATION_EXTENSION_MS)
-    await order.save()
-
     res.status(200).json({
       authorizationUrl: response.data.data.authorization_url,
       reference
@@ -65,6 +134,31 @@ exports.initPaystackTransaction = async (req, res) => {
 
   } catch (error) {
     console.error("Paystack init error:", error.response?.data || error.message)
+    // Release reservation if paystack init failed after we reserved.
+    if (req.body?.orderId) {
+      try {
+        const order = await Order.findById(req.body.orderId).select('_id items')
+        if (order) {
+          const cleanupSession = await mongoose.startSession()
+          cleanupSession.startTransaction()
+          try {
+            await releaseOrderReservations(order, cleanupSession)
+            await Order.updateOne(
+              { _id: order._id },
+              { $set: { status: 'cancelled', paymentStatus: 'failed' } },
+              { session: cleanupSession }
+            )
+            await cleanupSession.commitTransaction()
+          } catch (releaseErr) {
+            await cleanupSession.abortTransaction()
+          } finally {
+            cleanupSession.endSession()
+          }
+        }
+      } catch {
+        // ignore cleanup errors
+      }
+    }
     res.status(500).json({ message: "Payment initialization failed" })
   }
 }

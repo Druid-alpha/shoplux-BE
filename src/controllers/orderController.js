@@ -217,21 +217,6 @@ exports.createOrder = async (req, res) => {
           throw new Error('Insufficient variant stock')
         }
 
-        const reserveVariantResult = await Product.updateOne(
-          {
-            _id: product._id,
-            'variants._id': resolvedVariant._id,
-            'variants.stock': { $gte: cartItem.qty },
-            'variants.reserved': { $lte: (resolvedVariant.stock - cartItem.qty) }
-          },
-          { $inc: { 'variants.$.reserved': cartItem.qty } },
-          { session }
-        )
-
-        if (reserveVariantResult.modifiedCount === 0) {
-          throw new Error('Insufficient variant stock')
-        }
-
         const variantDiscount = Number(resolvedVariant.discount ?? product.discount ?? 0)
         price = variantDiscount > 0
           ? resolvedVariant.price * (1 - variantDiscount / 100)
@@ -248,20 +233,6 @@ exports.createOrder = async (req, res) => {
       } else {
         const availableBase = Number(product.stock || 0) - Number(product.reserved || 0)
         if (availableBase < cartItem.qty) {
-          throw new Error('Insufficient product stock')
-        }
-
-        const reserveBaseResult = await Product.updateOne(
-          {
-            _id: product._id,
-            stock: { $gte: cartItem.qty },
-            reserved: { $lte: (product.stock - cartItem.qty) }
-          },
-          { $inc: { reserved: cartItem.qty } },
-          { session }
-        )
-
-        if (reserveBaseResult.modifiedCount === 0) {
           throw new Error('Insufficient product stock')
         }
 
