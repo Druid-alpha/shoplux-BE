@@ -5,6 +5,7 @@ const authCookie = require('../middleware/authCookie')
 const requireAdmin = require('../middleware/requireAdmin')
 const Color = require('../../models/Color')
 const Category = require('../../models/Category')
+const Product = require('../../models/product')
 const mongoose = require('mongoose')
 
 // ✅ Protect all admin routes
@@ -106,6 +107,42 @@ const HEX_NAME_MAP = {
     '#efeae6': 'Pearl White',
     '#656b83': 'Slate Blue'
 }
+
+// Reset reserved stock for a product (admin only)
+router.post('/reservations/reset-product', async (req, res) => {
+    try {
+        const { productId, title } = req.body || {}
+        let product = null
+
+        if (productId && mongoose.isValidObjectId(productId)) {
+            product = await Product.findById(productId).select('_id title reserved variants')
+        } else if (title) {
+            product = await Product.findOne({
+                title: new RegExp(`^${escapeRegex(title)}$`, 'i')
+            }).select('_id title reserved variants')
+        }
+
+        if (!product) {
+            return res.status(404).json({ message: 'Product not found' })
+        }
+
+        await Product.updateOne(
+            { _id: product._id },
+            {
+                $set: {
+                    reserved: 0,
+                    'variants.$[].reserved': 0
+                }
+            }
+        )
+
+        const refreshed = await Product.findById(product._id).select('_id title reserved variants')
+        res.json({ message: 'Reservation reset', product: refreshed })
+    } catch (error) {
+        console.error('[RESERVATION RESET]', error)
+        res.status(500).json({ message: 'Failed to reset reservation', error: error.message })
+    }
+})
 
 // Add a new raw color directly from Product Form
 router.post('/colors', async (req, res) => {
