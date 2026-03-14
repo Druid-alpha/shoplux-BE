@@ -58,6 +58,30 @@ const resolveColorLabel = (() => {
   }
 })()
 
+const colorKey = (value) => {
+  if (!value) return ''
+  if (typeof value === 'object') {
+    return String(value._id || value.name || value.hex || '')
+  }
+  return String(value)
+}
+
+const findVariantByOptions = (product, size, color) => {
+  if (!product?.variants?.length) return null
+  const sizeKey = String(size || '')
+  const colorKeyValue = colorKey(color)
+  if (!sizeKey && !colorKeyValue) return null
+  const exact = product.variants.find(v => {
+    const vSize = String(v?.options?.size || '')
+    const vColor = colorKey(v?.options?.color)
+    if (sizeKey && colorKeyValue) return vSize === sizeKey && vColor === colorKeyValue
+    if (sizeKey) return vSize === sizeKey
+    if (colorKeyValue) return vColor === colorKeyValue
+    return false
+  })
+  return exact || null
+}
+
 
 
 exports.createOrder = async (req, res) => {
@@ -103,6 +127,8 @@ exports.createOrder = async (req, res) => {
             (cartVariantSku && v.sku === cartVariantSku)
         )
         if (!resolvedVariant) throw new Error('Variant not found')
+      } else if ((cartVariantSize || cartVariantColor) && product.variants?.length) {
+        resolvedVariant = findVariantByOptions(product, cartVariantSize, cartVariantColor)
       }
 
       if (resolvedVariant) {
