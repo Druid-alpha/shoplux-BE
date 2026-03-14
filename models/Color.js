@@ -116,7 +116,8 @@ const familyFromHex = (hex) => {
     return 'gray'
   }
 
-  if ((hue >= 330 || hue < 15) && l >= 0.7) return 'pink'
+  if (hue >= 45 && hue < 70 && l < 0.4) return 'olive'
+  if ((hue >= 330 || hue < 15) && l >= 0.6) return 'pink'
   if (hue >= 330 || hue < 15) return 'red'
   if (hue < 45) return 'orange'
   if (hue < 70) return 'yellow'
