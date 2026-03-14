@@ -11,7 +11,7 @@ const cloudinary = require('../config/cloudinary')
 const { runOrderReservationCleanupOnce } = require('../jobs/orderReservationCleanupJob')
 const { releaseOrderReservations } = require('../utils/reservation')
 
-const RESERVATION_WINDOW_MS = 15 * 60 * 1000
+const RESERVATION_WINDOW_MS = 10 * 60 * 1000
 
 function buildPublicInvoiceUrl(orderId, version) {
   return cloudinary.url(`invoices/invoice-${orderId}`, {
@@ -204,7 +204,11 @@ exports.createOrder = async (req, res) => {
         resolvedVariant = await findVariantByOptions(product, cartVariantSize, cartVariantColor)
       }
       if (!resolvedVariant && product.variants?.length && (cartVariantSize || cartVariantColor)) {
-        throw new Error('Variant not found')
+        // If no SKU/_id and base stock exists, allow base purchase even when variants exist.
+        const availableBaseForFallback = Number(product.stock || 0) - Number(product.reserved || 0)
+        if (availableBaseForFallback < cartItem.qty) {
+          throw new Error('Variant not found')
+        }
       }
 
       if (resolvedVariant) {
@@ -380,13 +384,16 @@ exports.validateOrder = async (req, res) => {
         resolvedVariant = await findVariantByOptions(product, cartVariantSize, cartVariantColor)
       }
       if (!resolvedVariant && product.variants?.length && (cartVariantSize || cartVariantColor)) {
-        errors.push({
-          productId: product._id,
-          title: product.title,
-          message: 'Variant not found',
-          available: 0
-        })
-        continue
+        const availableBaseForFallback = Number(product.stock || 0) - Number(product.reserved || 0)
+        if (availableBaseForFallback < cartItem.qty) {
+          errors.push({
+            productId: product._id,
+            title: product.title,
+            message: 'Variant not found',
+            available: 0
+          })
+          continue
+        }
       }
 
       if (resolvedVariant) {
@@ -396,7 +403,9 @@ exports.validateOrder = async (req, res) => {
             productId: product._id,
             title: product.title,
             message: 'Insufficient variant stock',
-            available
+            available,
+            stock: Number(resolvedVariant.stock || 0),
+            reserved: Number(resolvedVariant.reserved || 0)
           })
         }
       } else {
@@ -406,7 +415,9 @@ exports.validateOrder = async (req, res) => {
             productId: product._id,
             title: product.title,
             message: 'Insufficient product stock',
-            available
+            available,
+            stock: Number(product.stock || 0),
+            reserved: Number(product.reserved || 0)
           })
         }
       }

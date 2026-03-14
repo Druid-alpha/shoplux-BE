@@ -656,13 +656,23 @@ exports.listProducts = async (req, res) => {
       const variantStock = prod.variants?.length
         ? prod.variants.reduce((sum, v) => sum + (v.stock || 0), 0)
         : 0;
+      const variantReserved = prod.variants?.length
+        ? prod.variants.reduce((sum, v) => sum + (v.reserved || 0), 0)
+        : 0;
+      const availableVariantStock = prod.variants?.length
+        ? prod.variants.reduce((sum, v) => sum + Math.max(0, (v.stock || 0) - (v.reserved || 0)), 0)
+        : 0;
 
       const totalStock = (prod.stock || 0) + variantStock;
+      const totalReserved = (prod.reserved || 0) + variantReserved;
+      const availableStock = Math.max(0, (prod.stock || 0) - (prod.reserved || 0)) + availableVariantStock;
 
       return {
         ...prod.toObject(),
         totalStock,
-        isOutOfStock: totalStock <= 0
+        totalReserved,
+        availableStock,
+        isOutOfStock: availableStock <= 0
       };
     });
 
@@ -793,18 +803,28 @@ exports.getProduct = async (req, res) => {
       return res.status(404).json({ message: 'Product not found' })
     }
 
-    // Calculate total stock dynamically (Base Stock + Variants Stock)
-    let totalStock = (product.stock || 0);
+    // Calculate total stock and reservation info
+    const variantStock = product.variants?.length
+      ? product.variants.reduce((sum, v) => sum + (v.stock || 0), 0)
+      : 0
+    const variantReserved = product.variants?.length
+      ? product.variants.reduce((sum, v) => sum + (v.reserved || 0), 0)
+      : 0
+    const availableVariantStock = product.variants?.length
+      ? product.variants.reduce((sum, v) => sum + Math.max(0, (v.stock || 0) - (v.reserved || 0)), 0)
+      : 0
 
-    if (product.variants?.length > 0) {
-      totalStock += product.variants.reduce((sum, v) => sum + (v.stock || 0), 0);
-    }
+    const totalStock = (product.stock || 0) + variantStock
+    const totalReserved = (product.reserved || 0) + variantReserved
+    const availableStock = Math.max(0, (product.stock || 0) - (product.reserved || 0)) + availableVariantStock
 
     res.json({
       product: {
         ...product.toObject(),
         totalStock,
-        isOutOfStock: totalStock <= 0
+        totalReserved,
+        availableStock,
+        isOutOfStock: availableStock <= 0
       }
     });
   } catch (err) {

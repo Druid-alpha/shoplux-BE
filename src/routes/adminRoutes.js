@@ -144,6 +144,20 @@ router.post('/reservations/reset-product', async (req, res) => {
     }
 })
 
+// Reset reserved stock for all products (admin only)
+router.post('/reservations/reset-all', async (req, res) => {
+    try {
+        const result = await Product.updateMany(
+            {},
+            { $set: { reserved: 0, 'variants.$[].reserved': 0 } }
+        )
+        res.json({ message: 'All reservations reset', result })
+    } catch (error) {
+        console.error('[RESERVATION RESET ALL]', error)
+        res.status(500).json({ message: 'Failed to reset all reservations', error: error.message })
+    }
+})
+
 // Add a new raw color directly from Product Form
 router.post('/colors', async (req, res) => {
     const { name, hex, category } = req.body
