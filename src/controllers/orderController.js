@@ -1,4 +1,5 @@
-﻿const mongoose = require('mongoose')
+const mongoose = require('mongoose')
+const https = require('https')
 const Order = require('../../models/order')
 const User = require('../../models/user')
 const Product = require('../../models/product')
@@ -188,7 +189,7 @@ exports.createOrder = async (req, res) => {
 
       let price = product.price
 
-      // âœ… Apply Discount logic
+      // ✅ Apply Discount logic
       const baseDiscount = Number(product.discount || 0)
       if (baseDiscount > 0) {
         price = price * (1 - baseDiscount / 100)
@@ -543,18 +544,65 @@ exports.generateOrderInvoice = async (req, res) => {
         order.invoiceUrl = buildPublicInvoiceUrl(order._id)
         await order.save()
       }
-      const version = getVersionFromUrl(order.invoiceUrl)
-      const signedUrl = buildSignedInvoiceUrl(order._id, version)
-      return res.json({ invoiceUrl: signedUrl, generated: false })
+      return res.json({ invoiceUrl: order.invoiceUrl, generated: false })
     }
 
     const invoiceUrl = await generateInvoiceForOrder(order)
-    const version = getVersionFromUrl(invoiceUrl)
-    const signedUrl = buildSignedInvoiceUrl(order._id, version)
-    return res.json({ invoiceUrl: signedUrl, generated: true })
+    return res.json({ invoiceUrl, generated: true })
   } catch (error) {
     console.error('Generate invoice error:', error)
     res.status(500).json({ message: 'Failed to generate invoice' })
+  }
+}
+
+exports.downloadOrderInvoice = async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id).populate('user', 'email name')
+    if (!order) return res.status(404).json({ message: 'Order not found' })
+
+    const isAdmin = req.user.role === 'admin'
+    const isOwner = String(order.user?._id || order.user) === String(req.user.id)
+    if (!isOwner && !isAdmin) {
+      return res.status(403).json({ message: 'Access denied' })
+    }
+
+    if (order.paymentStatus !== 'paid') {
+      return res.status(400).json({ message: 'Invoice is available after successful payment' })
+    }
+
+    if (!order.invoiceUrl) {
+      await generateInvoiceForOrder(order)
+    }
+
+    if (order.invoiceUrl.includes('/fl_attachment/') || order.invoiceUrl.includes('/s--')) {
+      order.invoiceUrl = buildPublicInvoiceUrl(order._id)
+      await order.save()
+    }
+
+    const invoiceUrl = order.invoiceUrl
+    res.setHeader('Content-Type', 'application/pdf')
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="ShopLuxe_Invoice_${order._id}.pdf"`
+    )
+
+    const streamFromUrl = (url) => new Promise((resolve, reject) => {
+      https.get(url, (response) => {
+        if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+          return resolve(streamFromUrl(response.headers.location))
+        }
+        if (response.statusCode !== 200) {
+          return reject(new Error(`Invoice fetch failed: ${response.statusCode}`))
+        }
+        response.pipe(res)
+        response.on('end', resolve)
+      }).on('error', reject)
+    })
+
+    await streamFromUrl(invoiceUrl)
+  } catch (error) {
+    console.error('Download invoice error:', error)
+    res.status(500).json({ message: 'Failed to download invoice' })
   }
 }
 

@@ -11,7 +11,8 @@
     "dev": "nodemon index.js",
     "migrate:sizes": "node migrateProductSizes.js",
     "fix:variant-skus": "node scripts/fixDuplicateVariantSkus.js",
-    "scan:variant-skus": "node scripts/scanDuplicateVariantSkus.js"
+    "scan:variant-skus": "node scripts/scanDuplicateVariantSkus.js",
+    "normalize:invoice-urls": "node scripts/normalizeInvoiceUrls.js"
   },
   "keywords": [],
   "author": "",
