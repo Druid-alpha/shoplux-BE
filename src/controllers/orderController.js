@@ -8,6 +8,7 @@ const fs = require('fs')
 const os = require('os')
 const PDFDocument = require('pdfkit')
 const cloudinary = require('../config/cloudinary')
+const { runOrderReservationCleanupOnce } = require('../jobs/orderReservationCleanupJob')
 
 const RESERVATION_WINDOW_MS = 15 * 60 * 1000
 
@@ -133,6 +134,11 @@ exports.createOrder = async (req, res) => {
   const session = await mongoose.startSession()
   session.startTransaction()
   try {
+    try {
+      await runOrderReservationCleanupOnce()
+    } catch (cleanupErr) {
+      console.warn('[ORDER] Reservation cleanup skipped:', cleanupErr.message)
+    }
     const { shippingAddress } = req.body
 
     if (!shippingAddress?.fullName || !shippingAddress?.address || !shippingAddress?.city || !shippingAddress?.state || !shippingAddress?.phone) {
@@ -176,6 +182,9 @@ exports.createOrder = async (req, res) => {
         if (!resolvedVariant) throw new Error('Variant not found')
       } else if ((cartVariantSize || cartVariantColor) && product.variants?.length) {
         resolvedVariant = await findVariantByOptions(product, cartVariantSize, cartVariantColor)
+      }
+      if (!resolvedVariant && product.variants?.length && (cartVariantSize || cartVariantColor)) {
+        throw new Error('Variant not found')
       }
 
       if (resolvedVariant) {
@@ -276,12 +285,23 @@ exports.createOrder = async (req, res) => {
     await session.abortTransaction()
     session.endSession()
     console.error(error)
+    if (String(error.message || '').toLowerCase().includes('insufficient')) {
+      return res.status(409).json({ message: error.message })
+    }
+    if (String(error.message || '').toLowerCase().includes('variant not found')) {
+      return res.status(400).json({ message: error.message })
+    }
     res.status(500).json({ message: error.message })
   }
 }
 
 exports.validateOrder = async (req, res) => {
   try {
+    try {
+      await runOrderReservationCleanupOnce()
+    } catch (cleanupErr) {
+      console.warn('[ORDER VALIDATE] Reservation cleanup skipped:', cleanupErr.message)
+    }
     const user = await User.findById(req.user.id)
     if (!user || !user.cart.length) {
       return res.status(400).json({ message: 'Cart is empty' })
@@ -309,6 +329,15 @@ exports.validateOrder = async (req, res) => {
         )
       } else if ((cartVariantSize || cartVariantColor) && product.variants?.length) {
         resolvedVariant = await findVariantByOptions(product, cartVariantSize, cartVariantColor)
+      }
+      if (!resolvedVariant && product.variants?.length && (cartVariantSize || cartVariantColor)) {
+        errors.push({
+          productId: product._id,
+          title: product.title,
+          message: 'Variant not found',
+          available: 0
+        })
+        continue
       }
 
       if (resolvedVariant) {
