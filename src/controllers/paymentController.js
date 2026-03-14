@@ -129,7 +129,8 @@ exports.initPaystackTransaction = async (req, res) => {
 
     res.status(200).json({
       authorizationUrl: response.data.data.authorization_url,
-      reference
+      reference,
+      expiresAt: order.expiresAt
     })
 
   } catch (error) {

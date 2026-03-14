@@ -152,11 +152,17 @@ exports.createOrder = async (req, res) => {
     }
 
     // Release any pending unpaid reservations for this user to avoid stacking reservations.
+    const now = new Date()
     const pendingOrders = await Order.find({
       user: req.user.id,
       status: 'pending',
       paymentStatus: 'pending',
-      $or: [{ paymentRef: { $exists: false } }, { paymentRef: null }, { paymentRef: '' }]
+      $or: [
+        { paymentRef: { $exists: false } },
+        { paymentRef: null },
+        { paymentRef: '' },
+        { expiresAt: { $lt: now } }
+      ]
     }).select('_id items')
 
     if (pendingOrders.length) {
@@ -303,11 +309,17 @@ exports.validateOrder = async (req, res) => {
     }
 
     // Release any pending unpaid reservations for this user to avoid stacking reservations.
+    const now = new Date()
     const pendingOrders = await Order.find({
       user: req.user.id,
       status: 'pending',
       paymentStatus: 'pending',
-      $or: [{ paymentRef: { $exists: false } }, { paymentRef: null }, { paymentRef: '' }]
+      $or: [
+        { paymentRef: { $exists: false } },
+        { paymentRef: null },
+        { paymentRef: '' },
+        { expiresAt: { $lt: now } }
+      ]
     }).select('_id items')
 
     if (pendingOrders.length) {

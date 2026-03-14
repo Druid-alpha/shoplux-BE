@@ -7,6 +7,7 @@ const Brand = require('../../models/Brand')
 const Category = require('../../models/Category')
 const Color = require('../../models/Color')
 const { uploadToCloudinary } = require('../middleware/uploadMiddleware')
+const { runOrderReservationCleanupOnce } = require('../jobs/orderReservationCleanupJob')
 
 /* =====================================================
    HELPERS
@@ -611,6 +612,12 @@ exports.getFilterOptions = async (req, res) => {
 
 exports.listProducts = async (req, res) => {
   try {
+    try {
+      await runOrderReservationCleanupOnce()
+      invalidateListCache()
+    } catch (cleanupErr) {
+      console.warn('[PRODUCT LIST] Reservation cleanup skipped:', cleanupErr.message)
+    }
     const cacheKey = req.originalUrl || req.url
     const cached = getListCache(cacheKey)
     if (cached) {
@@ -790,6 +797,11 @@ exports.getFeatured = async (req, res) => {
 
 exports.getProduct = async (req, res) => {
   try {
+    try {
+      await runOrderReservationCleanupOnce()
+    } catch (cleanupErr) {
+      console.warn('[PRODUCT] Reservation cleanup skipped:', cleanupErr.message)
+    }
     if (!isValidObjectId(req.params.id)) {
       return res.status(400).json({ message: 'Invalid product id' })
     }
@@ -846,7 +858,7 @@ exports.adminListProducts = async (req, res) => {
       Product.countDocuments(query),
       Product.find(query)
         // Keep admin list fast: return only fields needed by the table.
-        .select('_id title price featured isDeleted images category brand variants createdAt')
+        .select('_id title price stock reserved featured isDeleted images category brand variants createdAt')
         .populate('brand', 'name')
         .populate('category', 'name')
         .skip((page - 1) * limit)

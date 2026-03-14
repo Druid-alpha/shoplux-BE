@@ -10,8 +10,7 @@ async function runOrderReservationCleanupOnce() {
   const expiredOrders = await Order.find({
     status: 'pending',
     paymentStatus: 'pending',
-    expiresAt: { $lt: now },
-    $or: [{ paymentRef: { $exists: false } }, { paymentRef: null }, { paymentRef: '' }]
+    expiresAt: { $exists: true, $lt: now }
   }).select('_id items')
 
   if (!expiredOrders.length) {
