@@ -52,7 +52,8 @@ exports.initPaystackTransaction = async (req, res) => {
         if (!product) continue
 
         let reserved = false
-        const hasVariant = !!(item.variant?._id || item.variant?.sku || item.variant?.size || item.variant?.color)
+        const hasVariant = Array.isArray(product?.variants) && product.variants.length > 0
+          && !!(item.variant?._id || item.variant?.sku || item.variant?.size || item.variant?.color)
 
         if (item.variant?._id) {
           const result = await Product.updateOne(
@@ -218,7 +219,8 @@ exports.verifyPaystackPayment = async (req, res) => {
         if (!product) continue
 
         let variantUpdated = false
-        const hasVariant = !!(item.variant?._id || item.variant?.sku || item.variant?.size || item.variant?.color)
+        const hasVariant = Array.isArray(product?.variants) && product.variants.length > 0
+          && !!(item.variant?._id || item.variant?.sku || item.variant?.size || item.variant?.color)
 
         if (item.variant?._id) {
           const result = await Product.updateOne(
@@ -353,7 +355,8 @@ exports.paystackWebHook = async (req, res) => {
       if (!product) continue
 
       let variantUpdated = false
-      const hasVariant = !!(item.variant?._id || item.variant?.sku || item.variant?.size || item.variant?.color)
+      const hasVariant = Array.isArray(product?.variants) && product.variants.length > 0
+        && !!(item.variant?._id || item.variant?.sku || item.variant?.size || item.variant?.color)
 
         if (item.variant?._id) {
           const result = await Product.updateOne(
