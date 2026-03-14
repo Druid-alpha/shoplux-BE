@@ -9,6 +9,7 @@ const os = require('os')
 const PDFDocument = require('pdfkit')
 const cloudinary = require('../config/cloudinary')
 const { runOrderReservationCleanupOnce } = require('../jobs/orderReservationCleanupJob')
+const { releaseOrderReservations } = require('../utils/reservation')
 
 const RESERVATION_WINDOW_MS = 15 * 60 * 1000
 
@@ -148,6 +149,25 @@ exports.createOrder = async (req, res) => {
     const user = await User.findById(req.user.id).session(session)
     if (!user || !user.cart.length) {
       return res.status(400).json({ message: 'Cart is empty' })
+    }
+
+    // Release any pending unpaid reservations for this user to avoid stacking reservations.
+    const pendingOrders = await Order.find({
+      user: req.user.id,
+      status: 'pending',
+      paymentStatus: 'pending',
+      $or: [{ paymentRef: { $exists: false } }, { paymentRef: null }, { paymentRef: '' }]
+    }).select('_id items')
+
+    if (pendingOrders.length) {
+      for (const order of pendingOrders) {
+        await releaseOrderReservations(order, session)
+        await Order.updateOne(
+          { _id: order._id },
+          { $set: { status: 'cancelled', paymentStatus: 'failed' } },
+          { session }
+        )
+      }
     }
 
     let total = 0
@@ -305,6 +325,35 @@ exports.validateOrder = async (req, res) => {
     const user = await User.findById(req.user.id)
     if (!user || !user.cart.length) {
       return res.status(400).json({ message: 'Cart is empty' })
+    }
+
+    // Release any pending unpaid reservations for this user to avoid stacking reservations.
+    const pendingOrders = await Order.find({
+      user: req.user.id,
+      status: 'pending',
+      paymentStatus: 'pending',
+      $or: [{ paymentRef: { $exists: false } }, { paymentRef: null }, { paymentRef: '' }]
+    }).select('_id items')
+
+    if (pendingOrders.length) {
+      const session = await mongoose.startSession()
+      session.startTransaction()
+      try {
+        for (const order of pendingOrders) {
+          await releaseOrderReservations(order, session)
+          await Order.updateOne(
+            { _id: order._id },
+            { $set: { status: 'cancelled', paymentStatus: 'failed' } },
+            { session }
+          )
+        }
+        await session.commitTransaction()
+      } catch (releaseErr) {
+        await session.abortTransaction()
+        console.warn('[ORDER VALIDATE] Reservation release failed:', releaseErr.message)
+      } finally {
+        session.endSession()
+      }
     }
 
     const errors = []
