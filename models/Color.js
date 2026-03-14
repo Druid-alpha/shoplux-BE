@@ -76,33 +76,55 @@ const familyFromName = (name) => {
   return ''
 }
 
+const rgbToHsl = (r, g, b) => {
+  const rn = r / 255
+  const gn = g / 255
+  const bn = b / 255
+  const max = Math.max(rn, gn, bn)
+  const min = Math.min(rn, gn, bn)
+  const delta = max - min
+  let h = 0
+  if (delta !== 0) {
+    if (max === rn) h = ((gn - bn) / delta) % 6
+    else if (max === gn) h = (bn - rn) / delta + 2
+    else h = (rn - gn) / delta + 4
+    h = Math.round(h * 60)
+    if (h < 0) h += 360
+  }
+  const l = (max + min) / 2
+  const s = delta === 0 ? 0 : delta / (1 - Math.abs(2 * l - 1))
+  return { h, s, l }
+}
+
 const familyFromHex = (hex) => {
   const h = normalizeHex(hex)
   if (!h) return ''
   const r = parseInt(h.slice(1, 3), 16)
   const g = parseInt(h.slice(3, 5), 16)
   const b = parseInt(h.slice(5, 7), 16)
+  const { h: hue, s, l } = rgbToHsl(r, g, b)
 
-  const max = Math.max(r, g, b)
-  const min = Math.min(r, g, b)
+  if (l <= 0.08) return 'black'
+  if (l >= 0.95) return 'white'
 
-  if (max < 40) return 'black'
-  if (min > 220) return 'white'
-  if (max - min < 20) return 'gray'
+  if (s < 0.12) {
+    if (l <= 0.2) return 'black'
+    if (l >= 0.9) return 'white'
+    if (hue >= 30 && hue < 70) return l >= 0.5 ? 'beige' : 'brown'
+    if (hue >= 70 && hue < 160) return 'olive'
+    if (hue >= 160 && hue < 250) return 'blue gray'
+    return 'gray'
+  }
 
-  if (r >= g && r >= b) {
-    if (g > 160) return 'orange'
-    if (g > 120) return 'orange'
-    return 'red'
-  }
-  if (g >= r && g >= b) {
-    if (b > 140) return 'teal'
-    return 'green'
-  }
-  if (b >= r && b >= g) {
-    if (r > 140) return 'purple'
-    return 'blue'
-  }
+  if ((hue >= 330 || hue < 15) && l >= 0.7) return 'pink'
+  if (hue >= 330 || hue < 15) return 'red'
+  if (hue < 45) return 'orange'
+  if (hue < 70) return 'yellow'
+  if (hue < 165) return 'green'
+  if (hue < 200) return 'teal'
+  if (hue < 255) return 'blue'
+  if (hue < 290) return 'purple'
+  if (hue < 330) return 'pink'
   return ''
 }
 

@@ -48,15 +48,16 @@ const familyFromHex = (hex) => {
 
   if (l <= 0.08) return 'black'
   if (l >= 0.95) return 'white'
-
-  if (s <= 0.08) {
-    if ((h >= 330 || h < 20) && l > 0.35) return 'pink'
-    if (h >= 20 && h < 60) return l > 0.35 ? 'beige' : 'brown'
-    if (h >= 60 && h < 170) return 'olive'
-    if (h >= 170 && h < 250) return 'blue gray'
+  if (s < 0.12) {
+    if (l <= 0.2) return 'black'
+    if (l >= 0.9) return 'white'
+    if (h >= 30 && h < 70) return l >= 0.5 ? 'beige' : 'brown'
+    if (h >= 70 && h < 160) return 'olive'
+    if (h >= 160 && h < 250) return 'blue gray'
     return 'gray'
   }
 
+  if ((h >= 330 || h < 15) && l >= 0.7) return 'pink'
   if (h >= 330 || h < 15) return 'red'
   if (h < 45) return 'orange'
   if (h < 70) return 'yellow'
