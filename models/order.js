@@ -32,9 +32,11 @@ const orderSchema = new mongoose.Schema({
   status: { type: String, enum: ['pending', 'paid', 'processing', 'shipped', 'delivered', 'failed', 'cancelled'], default: 'pending' },
   paymentStatus: { type: String, enum: ['pending', 'paid', 'failed', 'refunded'], default: 'pending' },
   paymentRef: String,
-  invoiceUrl: String
+  invoiceUrl: String,
+  expiresAt: { type: Date, default: null }
 }, { timestamps: true })
 
 orderSchema.index({ user: 1, createdAt: -1 })
+orderSchema.index({ expiresAt: 1 })
 
 module.exports = mongoose.model('order', orderSchema)

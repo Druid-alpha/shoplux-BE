@@ -10,6 +10,9 @@ const paystack = require('../config/paystack')
 const PDFDocument = require('pdfkit')
 const cloudinary = require('../config/cloudinary')
 const sendEmail = require('../utils/sendEmail')
+const { clampReservedToZero, releaseOrderReservations } = require('../utils/reservation')
+
+const PAYMENT_RESERVATION_EXTENSION_MS = 15 * 60 * 1000
 
 
 /* ================================================================
@@ -52,6 +55,7 @@ exports.initPaystackTransaction = async (req, res) => {
     })
 
     order.paymentRef = reference
+    order.expiresAt = new Date(Date.now() + PAYMENT_RESERVATION_EXTENSION_MS)
     await order.save()
 
     res.status(200).json({
@@ -122,7 +126,7 @@ exports.verifyPaystackPayment = async (req, res) => {
               "variants._id": item.variant._id,
               "variants.stock": { $gte: item.qty }
             },
-            { $inc: { "variants.$.stock": -item.qty } },
+            { $inc: { "variants.$.stock": -item.qty, "variants.$.reserved": -item.qty } },
             { session }
           )
           if (result.modifiedCount > 0) variantUpdated = true
@@ -135,7 +139,7 @@ exports.verifyPaystackPayment = async (req, res) => {
               "variants.sku": item.variant.sku,
               "variants.stock": { $gte: item.qty }
             },
-            { $inc: { "variants.$.stock": -item.qty } },
+            { $inc: { "variants.$.stock": -item.qty, "variants.$.reserved": -item.qty } },
             { session }
           )
           if (result.modifiedCount > 0) variantUpdated = true
@@ -144,10 +148,12 @@ exports.verifyPaystackPayment = async (req, res) => {
         if (!variantUpdated) {
           await Product.updateOne(
             { _id: product._id, stock: { $gte: item.qty } },
-            { $inc: { stock: -item.qty } },
+            { $inc: { stock: -item.qty, reserved: -item.qty } },
             { session }
           )
         }
+
+        await clampReservedToZero(product._id, session)
       }
 
       order.status = 'paid'
@@ -201,9 +207,20 @@ exports.paystackWebHook = async (req, res) => {
   if (event.event === 'charge.failed') {
     const order = await Order.findOne({ paymentRef: event.data.reference })
     if (order) {
-      order.paymentStatus = 'failed'
-      order.status = 'failed'
-      await order.save()
+      const failedSession = await mongoose.startSession()
+      failedSession.startTransaction()
+      try {
+        await releaseOrderReservations(order, failedSession)
+        order.paymentStatus = 'failed'
+        order.status = 'failed'
+        await order.save({ session: failedSession })
+        await failedSession.commitTransaction()
+      } catch (error) {
+        await failedSession.abortTransaction()
+        console.error('[WEBHOOK FAILED] Reservation release failed:', error.message)
+      } finally {
+        failedSession.endSession()
+      }
     }
     return res.sendStatus(200)
   }
@@ -232,43 +249,45 @@ exports.paystackWebHook = async (req, res) => {
 
       let variantUpdated = false
 
-      if (item.variant?._id) {
-        const result = await Product.updateOne(
-          {
-            _id: product._id,
-            "variants._id": item.variant._id,
-            "variants.stock": { $gte: item.qty }
-          },
-          { $inc: { "variants.$.stock": -item.qty } },
-          { session }
-        )
-        if (result.modifiedCount === 0) throw new Error("Stock conflict (variant sold out)")
-        variantUpdated = true
-      }
+        if (item.variant?._id) {
+          const result = await Product.updateOne(
+            {
+              _id: product._id,
+              "variants._id": item.variant._id,
+              "variants.stock": { $gte: item.qty }
+            },
+            { $inc: { "variants.$.stock": -item.qty, "variants.$.reserved": -item.qty } },
+            { session }
+          )
+          if (result.modifiedCount === 0) throw new Error("Stock conflict (variant sold out)")
+          variantUpdated = true
+        }
 
-      if (!variantUpdated && item.variant?.sku) {
-        const result = await Product.updateOne(
-          {
-            _id: product._id,
-            "variants.sku": item.variant.sku,
-            "variants.stock": { $gte: item.qty }
-          },
-          { $inc: { "variants.$.stock": -item.qty } },
-          { session }
-        )
-        if (result.modifiedCount === 0) throw new Error("Stock conflict (variant sold out)")
-        variantUpdated = true
-      }
+        if (!variantUpdated && item.variant?.sku) {
+          const result = await Product.updateOne(
+            {
+              _id: product._id,
+              "variants.sku": item.variant.sku,
+              "variants.stock": { $gte: item.qty }
+            },
+            { $inc: { "variants.$.stock": -item.qty, "variants.$.reserved": -item.qty } },
+            { session }
+          )
+          if (result.modifiedCount === 0) throw new Error("Stock conflict (variant sold out)")
+          variantUpdated = true
+        }
 
-      if (!variantUpdated) {
-        const result = await Product.updateOne(
-          { _id: product._id, stock: { $gte: item.qty } },
-          { $inc: { stock: -item.qty } },
-          { session }
-        )
-        if (result.modifiedCount === 0) throw new Error("Stock conflict (product sold out)")
+        if (!variantUpdated) {
+          const result = await Product.updateOne(
+            { _id: product._id, stock: { $gte: item.qty } },
+            { $inc: { stock: -item.qty, reserved: -item.qty } },
+            { session }
+          )
+          if (result.modifiedCount === 0) throw new Error("Stock conflict (product sold out)")
+        }
+
+        await clampReservedToZero(product._id, session)
       }
-    }
 
     order.status = 'paid'
     order.paymentStatus = 'paid'

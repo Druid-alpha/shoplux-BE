@@ -9,6 +9,8 @@ const os = require('os')
 const PDFDocument = require('pdfkit')
 const cloudinary = require('../config/cloudinary')
 
+const RESERVATION_WINDOW_MS = 15 * 60 * 1000
+
 function buildPublicInvoiceUrl(orderId, version) {
   return cloudinary.url(`invoices/invoice-${orderId}`, {
     resource_type: 'raw',
@@ -128,6 +130,8 @@ const findVariantByOptions = async (product, size, color) => {
 
 
 exports.createOrder = async (req, res) => {
+  const session = await mongoose.startSession()
+  session.startTransaction()
   try {
     const { shippingAddress } = req.body
 
@@ -135,7 +139,7 @@ exports.createOrder = async (req, res) => {
       return res.status(400).json({ message: 'Shipping address is required (fullName, phone, address, city, state)' })
     }
 
-    const user = await User.findById(req.user.id)
+    const user = await User.findById(req.user.id).session(session)
     if (!user || !user.cart.length) {
       return res.status(400).json({ message: 'Cart is empty' })
     }
@@ -144,7 +148,7 @@ exports.createOrder = async (req, res) => {
     const orderItems = []
 
     for (const cartItem of user.cart) {
-      const product = await Product.findById(cartItem.product)
+      const product = await Product.findById(cartItem.product).session(session)
       if (!product) {
         console.warn(`[CREATE ORDER] Product ${cartItem.product} not found, skipping ghost item.`)
         continue
@@ -175,7 +179,23 @@ exports.createOrder = async (req, res) => {
       }
 
       if (resolvedVariant) {
-        if (resolvedVariant.stock < cartItem.qty) {
+        const availableVariant = Number(resolvedVariant.stock || 0) - Number(resolvedVariant.reserved || 0)
+        if (availableVariant < cartItem.qty) {
+          throw new Error('Insufficient variant stock')
+        }
+
+        const reserveVariantResult = await Product.updateOne(
+          {
+            _id: product._id,
+            'variants._id': resolvedVariant._id,
+            'variants.stock': { $gte: cartItem.qty },
+            'variants.reserved': { $lte: (resolvedVariant.stock - cartItem.qty) }
+          },
+          { $inc: { 'variants.$.reserved': cartItem.qty } },
+          { session }
+        )
+
+        if (reserveVariantResult.modifiedCount === 0) {
           throw new Error('Insufficient variant stock')
         }
 
@@ -193,9 +213,25 @@ exports.createOrder = async (req, res) => {
           color: colorLabel || null
         }
       } else {
-        if (product.stock < cartItem.qty) {
+        const availableBase = Number(product.stock || 0) - Number(product.reserved || 0)
+        if (availableBase < cartItem.qty) {
           throw new Error('Insufficient product stock')
         }
+
+        const reserveBaseResult = await Product.updateOne(
+          {
+            _id: product._id,
+            stock: { $gte: cartItem.qty },
+            reserved: { $lte: (product.stock - cartItem.qty) }
+          },
+          { $inc: { reserved: cartItem.qty } },
+          { session }
+        )
+
+        if (reserveBaseResult.modifiedCount === 0) {
+          throw new Error('Insufficient product stock')
+        }
+
         if (cartVariantSize || cartVariantColor) {
           const colorLabel = await resolveColorLabel(cartVariantColor)
           variantData = {
@@ -219,22 +255,93 @@ exports.createOrder = async (req, res) => {
       // Stock is reduced after payment confirmation in webhook/verify
     }
 
-    const order = await Order.create({
+    const order = await Order.create([{
       user: req.user.id,
       items: orderItems,
       totalAmount: total,
       shippingAddress,
-      status: 'pending'
-    })
+      status: 'pending',
+      expiresAt: new Date(Date.now() + RESERVATION_WINDOW_MS)
+    }], { session })
+
+    await session.commitTransaction()
+    session.endSession()
 
     res.status(201).json({
-      order,
+      order: order[0],
       message: "Order created. Proceed to payment."
     })
 
   } catch (error) {
+    await session.abortTransaction()
+    session.endSession()
     console.error(error)
     res.status(500).json({ message: error.message })
+  }
+}
+
+exports.validateOrder = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id)
+    if (!user || !user.cart.length) {
+      return res.status(400).json({ message: 'Cart is empty' })
+    }
+
+    const errors = []
+
+    for (const cartItem of user.cart) {
+      const product = await Product.findById(cartItem.product)
+      if (!product) {
+        errors.push({ productId: cartItem.product, message: 'Product not found' })
+        continue
+      }
+
+      const cartVariant = cartItem.variant || {}
+      const cartVariantSku = cartVariant.sku || null
+      const cartVariantSize = cartVariant.size || null
+      const cartVariantColor = cartVariant.color || null
+      let resolvedVariant = null
+
+      if (cartVariant && (cartVariant._id || cartVariantSku)) {
+        resolvedVariant = product.variants.find(
+          v => (cartVariant._id && String(v._id) === String(cartVariant._id)) ||
+            (cartVariantSku && v.sku === cartVariantSku)
+        )
+      } else if ((cartVariantSize || cartVariantColor) && product.variants?.length) {
+        resolvedVariant = await findVariantByOptions(product, cartVariantSize, cartVariantColor)
+      }
+
+      if (resolvedVariant) {
+        const available = Number(resolvedVariant.stock || 0) - Number(resolvedVariant.reserved || 0)
+        if (available < cartItem.qty) {
+          errors.push({
+            productId: product._id,
+            title: product.title,
+            message: 'Insufficient variant stock',
+            available
+          })
+        }
+      } else {
+        const available = Number(product.stock || 0) - Number(product.reserved || 0)
+        if (available < cartItem.qty) {
+          errors.push({
+            productId: product._id,
+            title: product.title,
+            message: 'Insufficient product stock',
+            available
+          })
+        }
+      }
+    }
+
+    if (errors.length) {
+      return res.status(409).json({ message: 'Some items are out of stock', items: errors })
+    }
+
+    res.json({ ok: true })
+  } catch (error) {
+    console.error(error)
+    res.status(500).json({ message: 'Validation failed' })
   }
 }
 

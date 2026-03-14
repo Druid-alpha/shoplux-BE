@@ -169,6 +169,24 @@ const invalidateFeaturedCache = () => {
   featuredCache = { data: [], updatedAt: 0 }
 }
 
+const LIST_CACHE_TTL_MS = 30 * 1000
+const listCache = new Map()
+const getListCache = (key) => {
+  const entry = listCache.get(key)
+  if (!entry) return null
+  if (Date.now() - entry.updatedAt > LIST_CACHE_TTL_MS) {
+    listCache.delete(key)
+    return null
+  }
+  return entry.data
+}
+const setListCache = (key, data) => {
+  listCache.set(key, { data, updatedAt: Date.now() })
+}
+const invalidateListCache = () => {
+  listCache.clear()
+}
+
 
 const canonicalClothingType = (value) => {
   if (!value) return null
@@ -581,6 +599,12 @@ exports.getFilterOptions = async (req, res) => {
 
 exports.listProducts = async (req, res) => {
   try {
+    const cacheKey = req.originalUrl || req.url
+    const cached = getListCache(cacheKey)
+    if (cached) {
+      return res.json(cached)
+    }
+
     const page = Math.max(1, Number(req.query.page || 1))
     const limit = Math.min(100, Number(req.query.limit || 12))
     let sortByQuery = '-createdAt'
@@ -600,13 +624,15 @@ exports.listProducts = async (req, res) => {
     const totalPages = Math.max(1, Math.ceil(total / limit))
 
     if (total === 0) {
-      return res.json({
+      const emptyPayload = {
         products: [],
         total: 0,
         page: 1,
         pages: 1,
         message: 'No products found for the selected filters'
-      })
+      }
+      setListCache(cacheKey, emptyPayload)
+      return res.json(emptyPayload)
     }
 
     const products = await Product.find(query)
@@ -628,13 +654,15 @@ exports.listProducts = async (req, res) => {
       };
     });
 
-    res.json({
+    const payload = {
       products: productsWithStock,
       total,
       page,
       pages: totalPages,
       message: null
-    });
+    };
+    setListCache(cacheKey, payload)
+    res.json(payload);
   } catch (err) {
     console.error(err)
     res.status(500).json({ message: 'Failed to list products' })
@@ -670,6 +698,8 @@ exports.createFeatured = async (req, res) => {
     product.featured = featured
     await product.save()
     invalidateFeaturedCache()
+    invalidateListCache()
+    invalidateListCache()
 
     res.json({
       message: featured
@@ -994,6 +1024,7 @@ exports.createProduct = async (req, res) => {
     })
     await product.save()
     invalidateFeaturedCache()
+    invalidateListCache()
 
     res.status(201).json({ product })
   } catch (err) {
@@ -1236,6 +1267,7 @@ exports.updateProduct = async (req, res) => {
 
     await product.save()
     invalidateFeaturedCache()
+    invalidateListCache()
 
     res.json({ product })
   } catch (err) {
@@ -1312,6 +1344,7 @@ exports.updateVariants = async (req, res) => {
 
     await product.save()
     invalidateFeaturedCache()
+    invalidateListCache()
 
     res.json({ message: 'Variants updated', product })
   } catch (err) {
@@ -1368,6 +1401,7 @@ exports.deleteProduct = async (req, res) => {
     product.isDeleted = true
     await product.save()
     invalidateFeaturedCache()
+    invalidateListCache()
 
     res.json({ message: 'Product deleted and images cleared from Cloudinary' })
   } catch (err) {
@@ -1422,6 +1456,7 @@ exports.hardDeleteProduct = async (req, res) => {
 
     await product.deleteOne() // hard delete
     invalidateFeaturedCache()
+    invalidateListCache()
     res.json({ message: 'Product permanently deleted' })
   } catch (err) {
     console.error(err)
@@ -1451,6 +1486,7 @@ exports.restoreProduct = async (req, res) => {
     product.isDeleted = false
     await product.save()
     invalidateFeaturedCache()
+    invalidateListCache()
 
     res.json({ message: 'Product restored successfully', product })
   } catch (err) {
@@ -1465,7 +1501,10 @@ exports.restoreAllProducts = async (req, res) => {
       { isDeleted: true },
       { $set: { isDeleted: false } }
     )
-    if (result.modifiedCount > 0) invalidateFeaturedCache()
+    if (result.modifiedCount > 0) {
+      invalidateFeaturedCache()
+      invalidateListCache()
+    }
 
     res.json({
       message: `${result.modifiedCount} product(s) restored`,
@@ -1518,7 +1557,10 @@ exports.hardDeleteAllProducts = async (req, res) => {
 
     // Remove products from DB
     const result = await Product.deleteMany({ isDeleted: true })
-    if (result.deletedCount > 0) invalidateFeaturedCache()
+    if (result.deletedCount > 0) {
+      invalidateFeaturedCache()
+      invalidateListCache()
+    }
 
     res.json({ message: `${result.deletedCount} product(s) permanently deleted` })
   } catch (err) {

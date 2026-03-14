@@ -41,6 +41,11 @@ const variantSchema = new mongoose.Schema(
       default: 0,
       min: 0
     },
+    reserved: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
 
     image: {
       type: imageSchema,
@@ -98,6 +103,11 @@ const productSchema = new mongoose.Schema(
       default: 0,
       min: 0
     },
+    reserved: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
 
     discount: { type: Number, default: 0 },
     featured: { type: Boolean, default: false },
@@ -148,7 +158,8 @@ productSchema.index({ isDeleted: 1, clothingType: 1, createdAt: -1 })
 productSchema.index({ sizes: 1 })
 productSchema.index({ 'variants.options.color': 1 })
 productSchema.index({ isDeleted: 1, featured: 1, createdAt: -1 })
-productSchema.index({ sku: 1 })
+productSchema.index({ sku: 1 }, { unique: true, sparse: true })
+productSchema.index({ 'variants.sku': 1 }, { unique: true, sparse: true })
 
 /* ================= AUTO SYNC (SAFE) ================= */
 productSchema.pre('save', function (next) {

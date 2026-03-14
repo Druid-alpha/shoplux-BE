@@ -14,6 +14,7 @@ yarn-error.log*
 
 # production
 build/
+src/invoices/
 
 # Misc
 .DS_Store

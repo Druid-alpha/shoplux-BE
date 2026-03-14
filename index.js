@@ -10,8 +10,10 @@ const morgan = require('morgan')
 const bcrypt = require('bcryptjs')
 const User = require('./models/user')
 const { startInvoiceCleanupJob } = require('./src/jobs/invoiceCleanupJob')
+const { startOrderReservationCleanupJob } = require('./src/jobs/orderReservationCleanupJob')
 
 const app = express()
+const clientOrigin = process.env.CLIENT_URL
 
 /* ------------------------------------------------
    DATABASE CONNECTION
@@ -60,7 +62,25 @@ app.use(cookieParser())
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" },
   crossOriginEmbedderPolicy: false,
-  contentSecurityPolicy: false
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      baseUri: ["'self'"],
+      frameAncestors: ["'none'"],
+      objectSrc: ["'none'"],
+      imgSrc: ["'self'", "data:", "blob:", "https://*.cloudinary.com"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com"],
+      scriptSrc: ["'self'", "https://js.paystack.co", "https://checkout.paystack.com"],
+      frameSrc: ["'self'", "https://checkout.paystack.com"],
+      connectSrc: [
+        "'self'",
+        ...(clientOrigin ? [clientOrigin] : []),
+        "https://api.paystack.co",
+        "https://*.cloudinary.com"
+      ]
+    }
+  }
 }))
 
 app.use(cors({
@@ -113,7 +133,9 @@ app.use((req, res) => {
 
 app.use((err, req, res, next) => {
   console.error(err)
-  res.status(500).json({ message: 'Server error' })
+  res.status(err.status || 500).json({
+    message: err.message || 'Server error'
+  })
 })
 
 /* ------------------------------------------------
@@ -124,6 +146,7 @@ const PORT = process.env.PORT || 5000
 
 connectDB().then(() => {
   startInvoiceCleanupJob()
+  startOrderReservationCleanupJob()
   app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`)
   })
