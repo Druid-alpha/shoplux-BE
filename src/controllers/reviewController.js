@@ -1,6 +1,7 @@
 const Review = require('../../models/review')
 const Product = require('../../models/product')
 const Order = require('../../models/order')
+const User = require('../../models/user')
 const mongoose = require('mongoose')
 const { z } = require('zod')
 
@@ -9,6 +10,9 @@ const reviewSchema = z.object({
   title: z.string().optional(),
   body: z.string().optional(),
 })
+
+const escapeRegex = (value) =>
+  String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 // Recalculate product average rating
 const recalcProductRating = async (productId) => {
@@ -185,8 +189,50 @@ exports.listAllReviews = async (req, res) => {
     const page = Math.max(1, Number(req.query.page || 1))
     const limit = Math.min(100, Number(req.query.limit || 20))
 
-    const total = await Review.countDocuments()
-    const reviews = await Review.find()
+    const query = {}
+    const andConditions = []
+
+    const rating = Number(req.query.rating)
+    if (Number.isFinite(rating) && rating >= 1 && rating <= 5) {
+      andConditions.push({ rating })
+    }
+
+    const verified = String(req.query.verified || '').toLowerCase()
+    if (verified === 'verified' || verified === 'true') {
+      andConditions.push({ isVerified: true })
+    } else if (verified === 'guest' || verified === 'false') {
+      andConditions.push({ isVerified: { $ne: true } })
+    }
+
+    const featured = String(req.query.featured || '').toLowerCase()
+    if (featured === 'featured' || featured === 'true') {
+      andConditions.push({ isFeatured: true })
+    } else if (featured === 'not_featured' || featured === 'false') {
+      andConditions.push({ isFeatured: { $ne: true } })
+    }
+
+    const search = String(req.query.search || '').trim()
+    if (search) {
+      const regex = new RegExp(escapeRegex(search), 'i')
+      const [userIds, productIds] = await Promise.all([
+        User.find({ $or: [{ name: regex }, { email: regex }] }).select('_id').limit(50),
+        Product.find({ title: regex }).select('_id').limit(50),
+      ])
+
+      andConditions.push({
+        $or: [
+          { title: regex },
+          { body: regex },
+          { user: { $in: userIds.map(u => u._id) } },
+          { product: { $in: productIds.map(p => p._id) } },
+        ]
+      })
+    }
+
+    if (andConditions.length > 0) query.$and = andConditions
+
+    const total = await Review.countDocuments(query)
+    const reviews = await Review.find(query)
       .populate('user', 'name email avatar')
       .populate('product', 'title images')
       .sort({ createdAt: -1 })

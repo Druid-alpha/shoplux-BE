@@ -13,6 +13,7 @@ router.get('/featured', c.getFeaturedReviews)
 const requireAdmin = require('../middleware/requireAdmin')
 router.get('/admin/all', auth, requireAdmin, c.listAllReviews)
 router.patch('/admin/:reviewId/feature', auth, requireAdmin, c.toggleFeaturedReview)
+router.delete('/admin/:reviewId', auth, requireAdmin, c.deleteReview)
 
 // HELPFUL
 router.post('/:reviewId/helpful', auth, c.toggleHelpful)

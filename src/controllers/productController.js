@@ -409,6 +409,18 @@ const buildQueryFromReq = async (req, { admin = false } = {}) => {
     }
   }
 
+  // On Sale (discounted items)
+  const onSaleRaw = String(req.query.onSale || req.query.sale || '').toLowerCase()
+  const onSale = ['1', 'true', 'yes'].includes(onSaleRaw)
+  if (onSale) {
+    andConditions.push({
+      $or: [
+        { discount: { $gt: 0 } },
+        { 'variants.discount': { $gt: 0 } }
+      ]
+    })
+  }
+
   if (andConditions.length > 0) q.$and = andConditions
   return q
 }
