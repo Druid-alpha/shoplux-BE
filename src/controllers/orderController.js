@@ -58,25 +58,6 @@ const resolveColorLabel = (() => {
   }
 })()
 
-const colorKey = (value) => {
-  if (!value) return ''
-  if (typeof value === 'object') {
-    return String(value._id || value.name || value.hex || '')
-  }
-  return String(value)
-}
-
-const findVariantByOptions = (product, size, color) => {
-  if (!product?.variants?.length) return null
-  const sizeKey = String(size || '')
-  const colorKeyValue = colorKey(color)
-  if (!sizeKey && !colorKeyValue) return null
-  return product.variants.find(v => {
-    const vSize = String(v?.options?.size || '')
-    const vColor = colorKey(v?.options?.color)
-    return vSize === sizeKey && vColor === colorKeyValue
-  }) || null
-}
 
 
 exports.createOrder = async (req, res) => {
@@ -115,13 +96,6 @@ exports.createOrder = async (req, res) => {
       const cartVariantSku = cartVariant.sku || null
       const cartVariantSize = cartVariant.size || null
       const cartVariantColor = cartVariant.color || null
-      const normalizeColorKey = (value) => {
-        if (!value) return ""
-        if (typeof value === 'object') return String(value._id || value.name || value.hex || "")
-        return String(value)
-      }
-      const cartColorKey = normalizeColorKey(cartVariantColor)
-
       let resolvedVariant = null
       if (cartVariant && (cartVariant._id || cartVariantSku)) {
         resolvedVariant = product.variants.find(
@@ -129,12 +103,6 @@ exports.createOrder = async (req, res) => {
             (cartVariantSku && v.sku === cartVariantSku)
         )
         if (!resolvedVariant) throw new Error('Variant not found')
-      } else if (cartVariantSize && cartVariantColor && product.variants?.length) {
-        resolvedVariant = product.variants.find(v => {
-          const vColorKey = normalizeColorKey(v.options?.color)
-          return String(v.options?.size || '') === String(cartVariantSize || '') &&
-            vColorKey && cartColorKey && String(vColorKey) === String(cartColorKey)
-        })
       }
 
       if (resolvedVariant) {

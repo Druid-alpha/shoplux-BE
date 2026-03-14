@@ -11,32 +11,6 @@ const PDFDocument = require('pdfkit')
 const cloudinary = require('../config/cloudinary')
 const sendEmail = require('../utils/sendEmail')
 
-const colorKey = (value) => {
-  if (!value) return ""
-  if (typeof value === "object") {
-    return String(value._id || value.name || value.hex || "")
-  }
-  return String(value)
-}
-
-const findVariantForItem = (product, itemVariant) => {
-  if (!product?.variants?.length || !itemVariant) return null
-  if (itemVariant._id) {
-    return product.variants.find(v => String(v._id) === String(itemVariant._id)) || null
-  }
-  if (itemVariant.sku) {
-    return product.variants.find(v => String(v.sku) === String(itemVariant.sku)) || null
-  }
-  const size = itemVariant.size || ""
-  const color = colorKey(itemVariant.color)
-  if (!size && !color) return null
-  return product.variants.find(v => {
-    const vSize = v?.options?.size || ""
-    const vColor = colorKey(v?.options?.color)
-    return String(vSize) === String(size) && String(vColor) === String(color)
-  }) || null
-}
-
 
 /* ================================================================
    INIT — Create Paystack transaction for a pending order
@@ -167,22 +141,6 @@ exports.verifyPaystackPayment = async (req, res) => {
           if (result.modifiedCount > 0) variantUpdated = true
         }
 
-        if (!variantUpdated && item.variant) {
-          const matched = findVariantForItem(product, item.variant)
-          if (matched?._id) {
-            const result = await Product.updateOne(
-              {
-                _id: product._id,
-                "variants._id": matched._id,
-                "variants.stock": { $gte: item.qty }
-              },
-              { $inc: { "variants.$.stock": -item.qty } },
-              { session }
-            )
-            if (result.modifiedCount > 0) variantUpdated = true
-          }
-        }
-
         if (!variantUpdated) {
           await Product.updateOne(
             { _id: product._id, stock: { $gte: item.qty } },
@@ -300,23 +258,6 @@ exports.paystackWebHook = async (req, res) => {
         )
         if (result.modifiedCount === 0) throw new Error("Stock conflict (variant sold out)")
         variantUpdated = true
-      }
-
-      if (!variantUpdated && item.variant) {
-        const matched = findVariantForItem(product, item.variant)
-        if (matched?._id) {
-          const result = await Product.updateOne(
-            {
-              _id: product._id,
-              "variants._id": matched._id,
-              "variants.stock": { $gte: item.qty }
-            },
-            { $inc: { "variants.$.stock": -item.qty } },
-            { session }
-          )
-          if (result.modifiedCount === 0) throw new Error("Stock conflict (variant sold out)")
-          variantUpdated = true
-        }
       }
 
       if (!variantUpdated) {
