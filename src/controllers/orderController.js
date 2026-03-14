@@ -1,4 +1,4 @@
-const mongoose = require('mongoose')
+﻿const mongoose = require('mongoose')
 const Order = require('../../models/order')
 const User = require('../../models/user')
 const Product = require('../../models/product')
@@ -58,27 +58,70 @@ const resolveColorLabel = (() => {
   }
 })()
 
-const colorKey = (value) => {
-  if (!value) return ''
-  if (typeof value === 'object') {
-    return String(value._id || value.name || value.hex || '')
+const escapeRegex = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+const resolveColorRef = async (raw) => {
+  if (!raw) return { provided: false, id: null, label: null }
+
+  if (typeof raw === 'object') {
+    const id = raw._id ? String(raw._id) : null
+    const label = raw.name || raw.hex || null
+    if (id) return { provided: true, id, label }
+    if (!label) return { provided: false, id: null, label: null }
+
+    const found = await Color.findOne({
+      $or: [
+        { name: new RegExp(`^${escapeRegex(label)}$`, 'i') },
+        { hex: new RegExp(`^${escapeRegex(label)}$`, 'i') }
+      ]
+    }).select('_id name hex').lean()
+
+    if (found) {
+      return { provided: true, id: String(found._id), label: found.name || found.hex || label }
+    }
+    return { provided: true, id: null, label }
   }
-  return String(value)
+
+  const rawStr = String(raw || '').trim()
+  if (!rawStr) return { provided: false, id: null, label: null }
+  if (mongoose.Types.ObjectId.isValid(rawStr)) return { provided: true, id: rawStr, label: null }
+
+  const label = rawStr
+  const found = await Color.findOne({
+    $or: [
+      { name: new RegExp(`^${escapeRegex(label)}$`, 'i') },
+      { hex: new RegExp(`^${escapeRegex(label)}$`, 'i') }
+    ]
+  }).select('_id name hex').lean()
+
+  if (found) {
+    return { provided: true, id: String(found._id), label: found.name || found.hex || label }
+  }
+  return { provided: true, id: null, label }
 }
 
-const findVariantByOptions = (product, size, color) => {
+const findVariantByOptions = async (product, size, color) => {
   if (!product?.variants?.length) return null
+
   const sizeKey = String(size || '')
-  const colorKeyValue = colorKey(color)
-  if (!sizeKey && !colorKeyValue) return null
+  const colorInfo = await resolveColorRef(color)
+  const colorProvided = colorInfo.provided
+  const colorId = colorInfo.id
+  const productHasColoredVariants = product.variants.some(v => v?.options?.color)
+
+  if (!sizeKey && !colorProvided) return null
+  if (colorProvided && !colorId) return null
+  if (!colorProvided && sizeKey && productHasColoredVariants) return null
+
   const exact = product.variants.find(v => {
     const vSize = String(v?.options?.size || '')
-    const vColor = colorKey(v?.options?.color)
-    if (sizeKey && colorKeyValue) return vSize === sizeKey && vColor === colorKeyValue
-    if (sizeKey) return vSize === sizeKey
-    if (colorKeyValue) return vColor === colorKeyValue
+    const vColorId = String(v?.options?.color || '')
+    if (sizeKey && colorId) return vSize === sizeKey && vColorId === colorId
+    if (sizeKey && !colorProvided) return vSize === sizeKey
+    if (!sizeKey && colorId) return vColorId === colorId
     return false
   })
+
   return exact || null
 }
 
@@ -109,7 +152,7 @@ exports.createOrder = async (req, res) => {
 
       let price = product.price
 
-      // ✅ Apply Discount logic
+      // âœ… Apply Discount logic
       const baseDiscount = Number(product.discount || 0)
       if (baseDiscount > 0) {
         price = price * (1 - baseDiscount / 100)
@@ -128,7 +171,7 @@ exports.createOrder = async (req, res) => {
         )
         if (!resolvedVariant) throw new Error('Variant not found')
       } else if ((cartVariantSize || cartVariantColor) && product.variants?.length) {
-        resolvedVariant = findVariantByOptions(product, cartVariantSize, cartVariantColor)
+        resolvedVariant = await findVariantByOptions(product, cartVariantSize, cartVariantColor)
       }
 
       if (resolvedVariant) {
@@ -440,3 +483,4 @@ async function generateInvoiceForOrder(order) {
 
   return order.invoiceUrl
 }
+
