@@ -503,21 +503,45 @@ exports.updateOrderStatus = async (req, res) => {
 }
 
 exports.deleteOrder = async (req, res) => {
+  const session = await mongoose.startSession()
+  session.startTransaction()
   try {
-    const order = await Order.findById(req.params.id)
-    if (!order) return res.status(404).json({ message: 'Order not found' })
-
-    const isAdmin = req.user.role === 'admin'
-
-    // Only admins can delete orders to prevent accidental customer deletes
-    if (!isAdmin) {
-      return res.status(403).json({ message: 'Access denied: Admins only' })
+    const order = await Order.findById(req.params.id).session(session)
+    if (!order) {
+      await session.abortTransaction()
+      session.endSession()
+      return res.status(404).json({ message: 'Order not found' })
     }
 
-    await Order.findByIdAndDelete(req.params.id)
-    res.json({ message: 'Order successfully deleted' })
+    const isAdmin = req.user.role === 'admin'
+    const isOwner = String(order.user) === String(req.user.id)
+
+    if (!isAdmin) {
+      // Owners can only cancel their own pending, unpaid orders.
+      if (!isOwner) {
+        await session.abortTransaction()
+        session.endSession()
+        return res.status(403).json({ message: 'Access denied' })
+      }
+      if (order.paymentStatus !== 'pending' || order.status !== 'pending') {
+        await session.abortTransaction()
+        session.endSession()
+        return res.status(400).json({ message: 'Only pending unpaid orders can be cancelled' })
+      }
+    }
+
+    if (order.status === 'pending' && order.paymentStatus === 'pending') {
+      await releaseOrderReservations(order, session)
+    }
+
+    await Order.deleteOne({ _id: order._id }, { session })
+    await session.commitTransaction()
+    session.endSession()
+    res.json({ message: isAdmin ? 'Order successfully deleted' : 'Order cancelled' })
 
   } catch (error) {
+    await session.abortTransaction()
+    session.endSession()
     console.error('Delete order error:', error)
     res.status(500).json({ message: 'Server error deleting order' })
   }

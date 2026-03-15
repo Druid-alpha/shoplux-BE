@@ -9,6 +9,7 @@ const morgan = require('morgan')
 
 const bcrypt = require('bcryptjs')
 const User = require('./models/user')
+const Category = require('./models/Category')
 const { startInvoiceCleanupJob } = require('./src/jobs/invoiceCleanupJob')
 const { startOrderReservationCleanupJob } = require('./src/jobs/orderReservationCleanupJob')
 
@@ -44,6 +45,15 @@ async function connectDB() {
       })
 
       console.log('✅ Default admin created')
+    }
+
+    const defaultCategories = ['Grocery']
+    for (const name of defaultCategories) {
+      const exists = await Category.findOne({ name: new RegExp(`^${name}$`, 'i') })
+      if (!exists) {
+        await Category.create({ name })
+        console.log(`✅ Default category created: ${name}`)
+      }
     }
   } catch (err) {
     console.error('❌ MongoDB connection error:', err.message)
