@@ -19,13 +19,12 @@ const RETURN_WINDOW_DAYS = 7
 const canRequestReturn = (order) => {
   if (!order) return { ok: false, reason: 'Order not found' }
   if (order.paymentStatus !== 'paid') return { ok: false, reason: 'Order not paid' }
-  if (order.status !== 'delivered') return { ok: false, reason: 'Order not delivered' }
   if (order.returnStatus && order.returnStatus !== 'none') return { ok: false, reason: 'Return already requested' }
 
   const anchor = order.deliveredAt || order.updatedAt || order.createdAt
   if (!anchor) return { ok: false, reason: 'Return window unavailable' }
   const windowMs = RETURN_WINDOW_DAYS * 24 * 60 * 60 * 1000
-  if (Date.now() - new Date(anchor).getTime() > windowMs) {
+  if (order.status === 'delivered' && Date.now() - new Date(anchor).getTime() > windowMs) {
     return { ok: false, reason: 'Return window expired' }
   }
   return { ok: true }
