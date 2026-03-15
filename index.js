@@ -10,6 +10,7 @@ const morgan = require('morgan')
 const bcrypt = require('bcryptjs')
 const User = require('./models/user')
 const Category = require('./models/Category')
+const Brand = require('./models/Brand')
 const { startInvoiceCleanupJob } = require('./src/jobs/invoiceCleanupJob')
 const { startOrderReservationCleanupJob } = require('./src/jobs/orderReservationCleanupJob')
 
@@ -53,6 +54,21 @@ async function connectDB() {
       if (!exists) {
         await Category.create({ name })
         console.log(`✅ Default category created: ${name}`)
+      }
+    }
+
+    const groceryCategory = await Category.findOne({ name: /^grocery$/i })
+    if (groceryCategory) {
+      const groceryBrands = ['Coca Cola', 'Dangote', 'Unilever', 'Nestle', 'Golden Penny']
+      for (const name of groceryBrands) {
+        const existingBrand = await Brand.findOne({
+          name: new RegExp(`^${name}$`, 'i'),
+          category: groceryCategory._id
+        })
+        if (!existingBrand) {
+          await Brand.create({ name, category: groceryCategory._id })
+          console.log(`✅ Grocery brand created: ${name}`)
+        }
       }
     }
   } catch (err) {

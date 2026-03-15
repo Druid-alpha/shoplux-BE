@@ -517,6 +517,7 @@ exports.getFilterOptions = async (req, res) => {
     const categories = await Category.find().select('_id name')
 
     const category = await resolveCategory(req.query.category)
+    const includeAllBrands = ['1', 'true', 'yes'].includes(String(req.query.includeAllBrands || '').toLowerCase())
     const isClothingCategory = category?.name?.toLowerCase() === 'clothing'
     const clothingType = req.query.clothingType && req.query.clothingType !== 'all'
       ? canonicalClothingType(req.query.clothingType)
@@ -576,7 +577,9 @@ exports.getFilterOptions = async (req, res) => {
     const combinedColorIds = [...new Set([...colorIdsFromMain, ...colorIdsFromVariants])].filter(Boolean)
 
     const [brands, colors] = await Promise.all([
-      Brand.find({ _id: { $in: brandIds }, isActive: true }).select('_id name'),
+      includeAllBrands
+        ? Brand.find({ ...(category ? { category: category._id } : {}), isActive: true }).select('_id name')
+        : Brand.find({ _id: { $in: brandIds }, isActive: true }).select('_id name'),
       Color.find({ _id: { $in: combinedColorIds } }).select('_id name hex')
     ])
 
