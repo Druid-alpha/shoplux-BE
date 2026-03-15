@@ -11,8 +11,35 @@ const PDFDocument = require('pdfkit')
 const cloudinary = require('../config/cloudinary')
 const { runOrderReservationCleanupOnce } = require('../jobs/orderReservationCleanupJob')
 const { releaseOrderReservations } = require('../utils/reservation')
+const sendEmail = require('../utils/sendEmail')
 
 const RESERVATION_WINDOW_MS = 10 * 60 * 1000
+const RETURN_WINDOW_DAYS = 7
+
+const canRequestReturn = (order) => {
+  if (!order) return { ok: false, reason: 'Order not found' }
+  if (order.paymentStatus !== 'paid') return { ok: false, reason: 'Order not paid' }
+  if (order.status !== 'delivered') return { ok: false, reason: 'Order not delivered' }
+  if (order.returnStatus && order.returnStatus !== 'none') return { ok: false, reason: 'Return already requested' }
+
+  const anchor = order.deliveredAt || order.updatedAt || order.createdAt
+  if (!anchor) return { ok: false, reason: 'Return window unavailable' }
+  const windowMs = RETURN_WINDOW_DAYS * 24 * 60 * 60 * 1000
+  if (Date.now() - new Date(anchor).getTime() > windowMs) {
+    return { ok: false, reason: 'Return window expired' }
+  }
+  return { ok: true }
+}
+
+const statusEmailContent = (order, status) => {
+  const statusLabel = String(status || '').toUpperCase()
+  return `
+    <h1>Your order is now ${statusLabel}</h1>
+    <p>Order ID: <strong>${order._id}</strong></p>
+    <p>We will keep you updated as your order progresses.</p>
+    <p><a class="button" href="${process.env.CLIENT_URL}/orders/${order._id}">View Order</a></p>
+  `
+}
 
 function buildPublicInvoiceUrl(orderId, version) {
   return cloudinary.url(`invoices/invoice-${orderId}`, {
@@ -494,11 +521,109 @@ exports.updateOrderStatus = async (req, res) => {
     }
 
     order.status = status
+    if (status === 'delivered') {
+      order.deliveredAt = new Date()
+    }
     await order.save()
+
+    try {
+      const user = await User.findById(order.user).select('email name')
+      if (user?.email) {
+        await sendEmail({
+          to: user.email,
+          subject: `Order Update: ${status}`,
+          title: `Order ${status}`,
+          htmlContent: statusEmailContent(order, status),
+          preheader: `Your order is now ${status}`
+        })
+      }
+    } catch (emailErr) {
+      console.error('[ORDER STATUS EMAIL] Failed:', emailErr.message)
+    }
+
     res.json({ order })
   } catch (error) {
     console.error(error)
     res.status(500).json({ message: 'Server error' })
+  }
+}
+
+exports.requestReturn = async (req, res) => {
+  try {
+    const { reason } = req.body || {}
+    const order = await Order.findById(req.params.id)
+    if (!order) return res.status(404).json({ message: 'Order not found' })
+
+    const isOwner = String(order.user) === String(req.user.id)
+    if (!isOwner) {
+      return res.status(403).json({ message: 'Access denied' })
+    }
+
+    const eligibility = canRequestReturn(order)
+    if (!eligibility.ok) {
+      return res.status(400).json({ message: eligibility.reason })
+    }
+
+    order.returnStatus = 'requested'
+    order.returnRequestedAt = new Date()
+    order.returnReason = String(reason || '').slice(0, 500)
+    await order.save()
+
+    res.json({ order, message: 'Return request submitted' })
+  } catch (error) {
+    console.error(error)
+    res.status(500).json({ message: 'Failed to request return' })
+  }
+}
+
+exports.updateReturnStatus = async (req, res) => {
+  try {
+    if (req.user?.role !== 'admin') {
+      return res.status(403).json({ message: 'Access denied: Admins only' })
+    }
+    const { status, note, refundAmount } = req.body || {}
+    const allowed = ['approved', 'rejected', 'refunded']
+    if (!allowed.includes(status)) {
+      return res.status(400).json({ message: 'Invalid return status' })
+    }
+
+    const order = await Order.findById(req.params.id).populate('user', 'email name')
+    if (!order) return res.status(404).json({ message: 'Order not found' })
+
+    order.returnStatus = status
+    order.returnNote = String(note || '').slice(0, 500)
+
+    if (status === 'refunded') {
+      order.refundStatus = 'processed'
+      order.refundAmount = Number(refundAmount || order.totalAmount || 0)
+      order.refundProcessedAt = new Date()
+      order.paymentStatus = 'refunded'
+    }
+    await order.save()
+
+    try {
+      if (order.user?.email) {
+        await sendEmail({
+          to: order.user.email,
+          subject: `Return ${status} - ShopLuxe`,
+          title: `Return ${status}`,
+          htmlContent: `
+            <h1>Your return request was ${status}</h1>
+            <p>Order ID: <strong>${order._id}</strong></p>
+            ${order.returnNote ? `<p>Note: ${order.returnNote}</p>` : ''}
+            <p><a class="button" href="${process.env.CLIENT_URL}/orders/${order._id}">View Order</a></p>
+          `,
+          preheader: `Return ${status}`
+        })
+      }
+    } catch (emailErr) {
+      console.error('[RETURN EMAIL] Failed:', emailErr.message)
+    }
+
+    res.json({ order, message: `Return ${status}` })
+  } catch (error) {
+    console.error(error)
+    res.status(500).json({ message: 'Failed to update return status' })
   }
 }
 

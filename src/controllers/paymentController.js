@@ -14,6 +14,80 @@ const { clampReservedToZero, releaseOrderReservations } = require('../utils/rese
 
 const PAYMENT_RESERVATION_EXTENSION_MS = 10 * 60 * 1000
 
+const normalizeRefundAmount = (orderTotal, amount) => {
+  if (!amount) return null
+  const numeric = Number(amount)
+  if (Number.isNaN(numeric) || numeric <= 0) return null
+  return Math.min(numeric, Number(orderTotal || 0))
+}
+
+exports.refundPaystackPayment = async (req, res) => {
+  try {
+    if (req.user?.role !== 'admin') {
+      return res.status(403).json({ message: 'Access denied: Admins only' })
+    }
+
+    const { orderId, amount, reason } = req.body || {}
+    if (!orderId) {
+      return res.status(400).json({ message: 'orderId is required' })
+    }
+
+    const order = await Order.findById(orderId).populate('user', 'email name')
+    if (!order) return res.status(404).json({ message: 'Order not found' })
+
+    if (!order.paymentRef) {
+      return res.status(400).json({ message: 'Order has no payment reference' })
+    }
+
+    if (order.paymentStatus !== 'paid') {
+      return res.status(400).json({ message: 'Order is not paid' })
+    }
+
+    const refundAmount = normalizeRefundAmount(order.totalAmount, amount)
+    const payload = {
+      transaction: order.paymentRef,
+      ...(refundAmount ? { amount: Math.round(refundAmount * 100) } : {}),
+      ...(reason ? { reason: String(reason).slice(0, 200) } : {})
+    }
+
+    const response = await paystack.post('/refund', payload)
+    const refundData = response?.data?.data
+
+    order.paymentStatus = 'refunded'
+    order.refundStatus = 'processed'
+    order.refundAmount = refundAmount || order.totalAmount || 0
+    order.refundProcessedAt = new Date()
+    if (order.returnStatus && order.returnStatus !== 'none') {
+      order.returnStatus = 'refunded'
+    }
+    await order.save()
+
+    try {
+      if (order.user?.email) {
+        await sendEmail({
+          to: order.user.email,
+          subject: 'Refund processed - ShopLuxe',
+          title: 'Refund processed',
+          htmlContent: `
+            <h1>Your refund is complete</h1>
+            <p>Order ID: <strong>${order._id}</strong></p>
+            <p>Amount: ₦${(order.refundAmount || 0).toLocaleString()}</p>
+            <p>If you have any questions, reply to this email.</p>
+          `,
+          preheader: 'Your refund has been processed'
+        })
+      }
+    } catch (emailErr) {
+      console.error('[REFUND EMAIL] Failed:', emailErr.message)
+    }
+
+    res.json({ order, refund: refundData, message: 'Refund processed' })
+  } catch (error) {
+    console.error('[REFUND ERROR]', error.response?.data || error.message)
+    res.status(500).json({ message: error.response?.data?.message || 'Refund failed' })
+  }
+}
+
 const findVariantByOptions = (product, size, color) => {
   if (!product?.variants?.length) return null
   const sizeKey = String(size || '')

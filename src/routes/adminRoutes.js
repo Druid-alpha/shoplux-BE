@@ -6,6 +6,7 @@ const requireAdmin = require('../middleware/requireAdmin')
 const Color = require('../../models/Color')
 const Category = require('../../models/Category')
 const Product = require('../../models/product')
+const Order = require('../../models/order')
 const mongoose = require('mongoose')
 
 // ✅ Protect all admin routes
@@ -155,6 +156,75 @@ router.post('/reservations/reset-all', async (req, res) => {
     } catch (error) {
         console.error('[RESERVATION RESET ALL]', error)
         res.status(500).json({ message: 'Failed to reset all reservations', error: error.message })
+    }
+})
+
+const escapeCsv = (value) => {
+    if (value === null || value === undefined) return ''
+    const str = String(value).replace(/"/g, '""')
+    if (/[",\n]/.test(str)) return `"${str}"`
+    return str
+}
+
+router.get('/export/products', async (req, res) => {
+    try {
+        const products = await Product.find({})
+            .populate('category', 'name')
+            .populate('brand', 'name')
+            .select('title price stock discount category brand isDeleted createdAt')
+            .lean()
+
+        const header = ['id', 'title', 'price', 'stock', 'discount', 'category', 'brand', 'deleted', 'createdAt']
+        const rows = products.map(p => ([
+            p._id,
+            p.title,
+            p.price,
+            p.stock,
+            p.discount,
+            p.category?.name || '',
+            p.brand?.name || '',
+            p.isDeleted ? 'yes' : 'no',
+            p.createdAt
+        ]))
+        const csv = [header, ...rows].map(r => r.map(escapeCsv).join(',')).join('\n')
+        res.setHeader('Content-Type', 'text/csv')
+        res.setHeader('Content-Disposition', `attachment; filename="products-${Date.now()}.csv"`)
+        res.send(csv)
+    } catch (error) {
+        console.error('[EXPORT PRODUCTS]', error)
+        res.status(500).json({ message: 'Failed to export products' })
+    }
+})
+
+router.get('/export/orders', async (req, res) => {
+    try {
+        const orders = await Order.find({})
+            .populate('user', 'email name')
+            .select('totalAmount status paymentStatus paymentRef returnStatus refundAmount createdAt shippingAddress')
+            .lean()
+
+        const header = ['id', 'customer', 'email', 'total', 'status', 'paymentStatus', 'paymentRef', 'returnStatus', 'refundAmount', 'state', 'city', 'createdAt']
+        const rows = orders.map(o => ([
+            o._id,
+            o.user?.name || '',
+            o.user?.email || '',
+            o.totalAmount,
+            o.status,
+            o.paymentStatus,
+            o.paymentRef,
+            o.returnStatus,
+            o.refundAmount,
+            o.shippingAddress?.state || '',
+            o.shippingAddress?.city || '',
+            o.createdAt
+        ]))
+        const csv = [header, ...rows].map(r => r.map(escapeCsv).join(',')).join('\n')
+        res.setHeader('Content-Type', 'text/csv')
+        res.setHeader('Content-Disposition', `attachment; filename="orders-${Date.now()}.csv"`)
+        res.send(csv)
+    } catch (error) {
+        console.error('[EXPORT ORDERS]', error)
+        res.status(500).json({ message: 'Failed to export orders' })
     }
 })
 
