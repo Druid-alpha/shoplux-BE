@@ -59,7 +59,7 @@ async function releaseOrderReservations(order, session) {
       const sizeKey = String(item.variant?.size || '').trim()
       const colorId = await resolveColorId(item.variant?.color)
       if (sizeKey || colorId) {
-        const product = await Product.findById(productId).select('variants').lean()
+        const product = await Product.findById(productId).select('reserved variants').lean()
         if (product?.variants?.length) {
           const match = product.variants.find(v => {
             const vSize = String(v?.options?.size || '').trim()
@@ -69,7 +69,7 @@ async function releaseOrderReservations(order, session) {
             if (sizeKey) return vSize === sizeKey && !vColor
             return false
           })
-          if (match?._id) {
+          if (match?._id && Number(match?.reserved || 0) >= item.qty) {
             await Product.updateOne(
               { _id: productId, 'variants._id': match._id },
               { $inc: { 'variants.$.reserved': -item.qty } },
