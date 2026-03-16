@@ -275,12 +275,16 @@ exports.initPaystackTransaction = async (req, res) => {
           const result = await Product.updateOne(
             {
               _id: product._id,
-              "variants._id": resolvedVariant._id,
-              "variants.stock": { $gte: item.qty },
-              "variants.reserved": { $lte: (resolvedVariant?.stock || 0) - item.qty }
+              variants: {
+                $elemMatch: {
+                  _id: resolvedVariant._id,
+                  stock: { $gte: item.qty },
+                  reserved: { $lte: (resolvedVariant?.stock || 0) - item.qty }
+                }
+              }
             },
-            { $inc: { "variants.$.reserved": item.qty } },
-            { session: reserveSession }
+            { $inc: { "variants.$[v].reserved": item.qty } },
+            { session: reserveSession, arrayFilters: [{ "v._id": resolvedVariant._id }] }
           )
           if (result.modifiedCount > 0) reserved = true
         }
@@ -447,11 +451,15 @@ exports.verifyPaystackPayment = async (req, res) => {
           const result = await Product.updateOne(
             {
               _id: product._id,
-              "variants._id": resolvedVariant._id,
-              "variants.stock": { $gte: item.qty }
+              variants: {
+                $elemMatch: {
+                  _id: resolvedVariant._id,
+                  stock: { $gte: item.qty }
+                }
+              }
             },
-            { $inc: { "variants.$.stock": -item.qty, "variants.$.reserved": -item.qty } },
-            { session }
+            { $inc: { "variants.$[v].stock": -item.qty, "variants.$[v].reserved": -item.qty } },
+            { session, arrayFilters: [{ "v._id": resolvedVariant._id }] }
           )
           if (result.modifiedCount > 0) variantUpdated = true
         }
@@ -590,11 +598,15 @@ exports.paystackWebHook = async (req, res) => {
         const result = await Product.updateOne(
           {
             _id: product._id,
-            "variants._id": resolvedVariant._id,
-            "variants.stock": { $gte: item.qty }
+            variants: {
+              $elemMatch: {
+                _id: resolvedVariant._id,
+                stock: { $gte: item.qty }
+              }
+            }
           },
-          { $inc: { "variants.$.stock": -item.qty, "variants.$.reserved": -item.qty } },
-          { session }
+          { $inc: { "variants.$[v].stock": -item.qty, "variants.$[v].reserved": -item.qty } },
+          { session, arrayFilters: [{ "v._id": resolvedVariant._id }] }
         )
         if (result.modifiedCount === 0) throw new Error("Stock conflict (variant sold out)")
         variantUpdated = true
