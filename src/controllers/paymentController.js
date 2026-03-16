@@ -187,6 +187,7 @@ exports.initPaystackTransaction = async (req, res) => {
         let reserved = false
         const hasVariant = Array.isArray(product?.variants) && product.variants.length > 0
           && !!(item.variant?._id || item.variant?.sku || item.variant?.size || item.variant?.color)
+        const hasExplicitVariant = !!(item.variant?._id || item.variant?.sku)
         const allowBaseFallback = !item.variant?._id && !item.variant?.sku && !item.variant?.size && !item.variant?.color
 
         if (item.variant?._id) {
@@ -218,7 +219,7 @@ exports.initPaystackTransaction = async (req, res) => {
           if (result.modifiedCount > 0) reserved = true
         }
 
-        if (!reserved && (item.variant?.size || item.variant?.color)) {
+        if (!reserved && !hasExplicitVariant && (item.variant?.size || item.variant?.color)) {
           const resolved = await findVariantByOptions(product, item.variant.size, item.variant.color)
           if (resolved?._id) {
             const result = await Product.updateOne(
@@ -374,6 +375,7 @@ exports.verifyPaystackPayment = async (req, res) => {
         let variantUpdated = false
         const hasVariant = Array.isArray(product?.variants) && product.variants.length > 0
           && !!(item.variant?._id || item.variant?.sku || item.variant?.size || item.variant?.color)
+        const hasExplicitVariant = !!(item.variant?._id || item.variant?.sku)
         const allowBaseFallback = !item.variant?._id && !item.variant?.sku && !item.variant?.size && !item.variant?.color
 
         if (item.variant?._id) {
@@ -402,7 +404,7 @@ exports.verifyPaystackPayment = async (req, res) => {
           if (result.modifiedCount > 0) variantUpdated = true
         }
 
-        if (!variantUpdated && (item.variant?.size || item.variant?.color)) {
+        if (!variantUpdated && !hasExplicitVariant && (item.variant?.size || item.variant?.color)) {
           const resolved = await findVariantByOptions(product, item.variant.size, item.variant.color)
           if (resolved?._id) {
             const result = await Product.updateOne(
@@ -529,6 +531,7 @@ exports.paystackWebHook = async (req, res) => {
       let variantUpdated = false
       const hasVariant = Array.isArray(product?.variants) && product.variants.length > 0
         && !!(item.variant?._id || item.variant?.sku || item.variant?.size || item.variant?.color)
+      const hasExplicitVariant = !!(item.variant?._id || item.variant?.sku)
       const allowBaseFallback = !item.variant?._id && !item.variant?.sku && !item.variant?.size && !item.variant?.color
 
         if (item.variant?._id) {
@@ -559,7 +562,7 @@ exports.paystackWebHook = async (req, res) => {
           variantUpdated = true
         }
 
-        if (!variantUpdated && (item.variant?.size || item.variant?.color)) {
+        if (!variantUpdated && !hasExplicitVariant && (item.variant?.size || item.variant?.color)) {
           const resolved = await findVariantByOptions(product, item.variant.size, item.variant.color)
           if (resolved?._id) {
             const result = await Product.updateOne(
