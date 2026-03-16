@@ -623,9 +623,6 @@ exports.addReturnMessageUser = async (req, res) => {
   try {
     const { message, attachments } = req.body || {}
     const trimmed = String(message || '').trim()
-    if (!trimmed) {
-      return res.status(400).json({ message: 'Message is required' })
-    }
 
     const order = await Order.findById(req.params.id).populate('user', 'email name')
     if (!order) return res.status(404).json({ message: 'Order not found' })
@@ -652,9 +649,14 @@ exports.addReturnMessageUser = async (req, res) => {
       files = uploadedUrls
     }
 
+    if (!trimmed && files.length === 0) {
+      return res.status(400).json({ message: 'Message or attachment is required' })
+    }
+    const safeMessage = trimmed || 'Attachment(s) provided'
+
     order.returnMessages = [
       ...(order.returnMessages || []),
-      { by: 'customer', message: trimmed.slice(0, 500), status: order.returnStatus || '', attachments: files }
+      { by: 'customer', message: safeMessage.slice(0, 500), status: order.returnStatus || '', attachments: files }
     ]
     await order.save()
 
