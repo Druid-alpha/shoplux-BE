@@ -10,7 +10,7 @@ const paystack = require('../config/paystack')
 const PDFDocument = require('pdfkit')
 const cloudinary = require('../config/cloudinary')
 const sendEmail = require('../utils/sendEmail')
-const { clampReservedToZero, releaseOrderReservations } = require('../utils/reservation')
+const { clampReservedToZero, releaseOrderReservations, resolveColorId } = require('../utils/reservation')
 
 const PAYMENT_RESERVATION_EXTENSION_MS = 10 * 60 * 1000
 
@@ -98,16 +98,24 @@ exports.refundPaystackPayment = async (req, res) => {
   }
 }
 
-const findVariantByOptions = (product, size, color) => {
+const findVariantByOptions = async (product, size, color) => {
   if (!product?.variants?.length) return null
-  const sizeKey = String(size || '')
-  const colorKey = color ? String(color._id || color) : ''
+  const sizeKey = String(size || '').trim()
+  const colorProvided = color !== null && color !== undefined && String(color).trim() !== ''
+  const colorId = await resolveColorId(color)
+  const hasColoredVariants = product.variants.some(v => v?.options?.color)
+
+  if (!sizeKey && !colorId) return null
+  if (colorProvided && !colorId && hasColoredVariants) return null
+
   return product.variants.find(v => {
-    const vSize = String(v?.options?.size || '')
+    const vSize = String(v?.options?.size || '').trim()
     const vColor = String(v?.options?.color?._id || v?.options?.color || '')
-    const sizeMatch = sizeKey ? vSize === sizeKey : true
-    const colorMatch = colorKey ? vColor === colorKey : true
-    return sizeMatch && colorMatch
+    if (sizeKey && colorId) return vSize === sizeKey && vColor === colorId
+    if (colorId) return vColor === colorId
+    if (sizeKey && !colorProvided) return vSize === sizeKey
+    if (sizeKey && !colorId && !hasColoredVariants) return vSize === sizeKey
+    return false
   }) || null
 }
 
@@ -182,7 +190,7 @@ exports.initPaystackTransaction = async (req, res) => {
         }
 
         if (!reserved && (item.variant?.size || item.variant?.color)) {
-          const resolved = findVariantByOptions(product, item.variant.size, item.variant.color)
+          const resolved = await findVariantByOptions(product, item.variant.size, item.variant.color)
           if (resolved?._id) {
             const result = await Product.updateOne(
               {
@@ -366,7 +374,7 @@ exports.verifyPaystackPayment = async (req, res) => {
         }
 
         if (!variantUpdated && (item.variant?.size || item.variant?.color)) {
-          const resolved = findVariantByOptions(product, item.variant.size, item.variant.color)
+          const resolved = await findVariantByOptions(product, item.variant.size, item.variant.color)
           if (resolved?._id) {
             const result = await Product.updateOne(
               {
@@ -523,7 +531,7 @@ exports.paystackWebHook = async (req, res) => {
         }
 
         if (!variantUpdated && (item.variant?.size || item.variant?.color)) {
-          const resolved = findVariantByOptions(product, item.variant.size, item.variant.color)
+          const resolved = await findVariantByOptions(product, item.variant.size, item.variant.color)
           if (resolved?._id) {
             const result = await Product.updateOne(
               {

@@ -55,6 +55,30 @@ async function releaseOrderReservations(order, session) {
         { session }
       )
       if (result.modifiedCount === 0) {
+        const sizeKey = String(item.variant?.size || '').trim()
+        const colorId = await resolveColorId(item.variant?.color)
+        if (sizeKey || colorId) {
+          const product = await Product.findById(productId).select('reserved variants').lean()
+          if (product?.variants?.length) {
+            const fallbackMatch = product.variants.find(v => {
+              const vSize = String(v?.options?.size || '').trim()
+              const vColor = String(v?.options?.color || '')
+              if (colorId && sizeKey) return vSize === sizeKey && vColor === colorId
+              if (colorId) return vColor === colorId
+              if (sizeKey) return vSize === sizeKey
+              return false
+            })
+            if (fallbackMatch?._id && Number(fallbackMatch?.reserved || 0) >= item.qty) {
+              await Product.updateOne(
+                { _id: productId, 'variants._id': fallbackMatch._id },
+                { $inc: { 'variants.$.reserved': -item.qty } },
+                { session }
+              )
+              await clampReservedToZero(productId, session)
+              continue
+            }
+          }
+        }
         await Product.updateOne(
           { _id: productId },
           { $inc: { reserved: -item.qty } },
@@ -99,5 +123,6 @@ async function releaseOrderReservations(order, session) {
 
 module.exports = {
   clampReservedToZero,
-  releaseOrderReservations
+  releaseOrderReservations,
+  resolveColorId
 }
