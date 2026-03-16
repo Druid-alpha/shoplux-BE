@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const User = require('../../models/user');
 const Product = require('../../models/product');
 const Color = require('../../models/Color');
+const { runOrderReservationCleanupOnce } = require('../jobs/orderReservationCleanupJob')
 
 const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(value);
 
@@ -88,6 +89,11 @@ const attachColorMeta = async (cart = []) => {
 
 /* ================= GET CART ================= */
 exports.getCart = async (req, res) => {
+  try {
+    await runOrderReservationCleanupOnce()
+  } catch (cleanupErr) {
+    console.warn('[CART] Reservation cleanup skipped:', cleanupErr.message)
+  }
   const user = await User.findById(req.user.id).populate({
     path: 'cart.product',
     populate: [

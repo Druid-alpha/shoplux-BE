@@ -563,9 +563,14 @@ exports.requestReturn = async (req, res) => {
       return res.status(400).json({ message: eligibility.reason })
     }
 
+    const trimmedReason = String(reason || '').trim()
+    if (!trimmedReason) {
+      return res.status(400).json({ message: 'Return reason is required' })
+    }
+
     order.returnStatus = 'requested'
     order.returnRequestedAt = new Date()
-    order.returnReason = String(reason || '').slice(0, 500)
+    order.returnReason = trimmedReason.slice(0, 500)
     await order.save()
 
     res.json({ order, message: 'Return request submitted' })
@@ -602,14 +607,26 @@ exports.updateReturnStatus = async (req, res) => {
 
     try {
       if (order.user?.email) {
+        const reasonLine = order.returnReason
+          ? `<p>Reason: ${order.returnReason}</p>`
+          : ''
+        const noteLine = order.returnNote
+          ? `<p>Note from support: ${order.returnNote}</p>`
+          : ''
         await sendEmail({
           to: order.user.email,
           subject: `Return ${status} - ShopLuxe`,
           title: `Return ${status}`,
+          text: `Your return request was ${status}. Order ID: ${order._id}.${
+            order.returnReason ? ` Reason: ${order.returnReason}.` : ''
+          }${
+            order.returnNote ? ` Note from support: ${order.returnNote}.` : ''
+          }`,
           htmlContent: `
             <h1>Your return request was ${status}</h1>
             <p>Order ID: <strong>${order._id}</strong></p>
-            ${order.returnNote ? `<p>Note: ${order.returnNote}</p>` : ''}
+            ${reasonLine}
+            ${noteLine}
             <p><a class="button" href="${process.env.CLIENT_URL}/orders/${order._id}">View Order</a></p>
           `,
           preheader: `Return ${status}`
