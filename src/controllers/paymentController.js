@@ -60,6 +60,9 @@ exports.refundPaystackPayment = async (req, res) => {
     if (order.returnStatus && order.returnStatus !== 'none') {
       order.returnStatus = 'refunded'
     }
+    if (reason) {
+      order.returnNote = String(reason).slice(0, 500)
+    }
     await order.save()
 
     try {
@@ -68,6 +71,9 @@ exports.refundPaystackPayment = async (req, res) => {
           to: order.user.email,
           subject: 'Refund processed - ShopLuxe',
           title: 'Refund processed',
+          text: `Your refund is complete. Order ID: ${order._id}. Amount: ₦${(order.refundAmount || 0).toLocaleString()}.${
+            order.returnNote ? ` Note from support: ${order.returnNote}.` : ''
+          }`,
           htmlContent: `
             <h1>Your refund is complete</h1>
             <p>Order ID: <strong>${order._id}</strong></p>

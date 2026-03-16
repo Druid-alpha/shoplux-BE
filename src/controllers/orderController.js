@@ -529,6 +529,46 @@ exports.getPendingReservation = async (req, res) => {
   }
 }
 
+exports.cancelPendingReservations = async (req, res) => {
+  try {
+    const orders = await Order.find({
+      user: req.user.id,
+      status: 'pending',
+      paymentStatus: 'pending'
+    }).select('_id items')
+
+    if (!orders.length) {
+      return res.json({ cleared: 0 })
+    }
+
+    let cleared = 0
+    for (const order of orders) {
+      const session = await mongoose.startSession()
+      session.startTransaction()
+      try {
+        await releaseOrderReservations(order, session)
+        await Order.updateOne(
+          { _id: order._id },
+          { $set: { status: 'cancelled', paymentStatus: 'failed' } },
+          { session }
+        )
+        await session.commitTransaction()
+        cleared += 1
+      } catch (error) {
+        await session.abortTransaction()
+        console.error('[ORDER RESERVATION] Cancel failed:', error.message)
+      } finally {
+        session.endSession()
+      }
+    }
+
+    res.json({ cleared })
+  } catch (error) {
+    console.error(error)
+    res.status(500).json({ message: 'Failed to cancel reservations' })
+  }
+}
+
 exports.updateOrderStatus = async (req, res) => {
   try {
     if (req.user?.role !== 'admin') {
