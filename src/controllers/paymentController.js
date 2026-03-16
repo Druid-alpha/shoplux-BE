@@ -13,41 +13,6 @@ const sendEmail = require('../utils/sendEmail')
 const { clampReservedToZero, releaseOrderReservations, resolveColorId } = require('../utils/reservation')
 
 const PAYMENT_RESERVATION_EXTENSION_MS = 10 * 60 * 1000
-const shouldDebugOrder = (orderId) => {
-  const target = String(process.env.DEBUG_ORDER_ID || '').trim()
-  if (!target) return false
-  return String(orderId || '') === target
-}
-
-const logOrderItemDebug = (phase, orderId, item, product, matches = {}) => {
-  try {
-    console.log('[PAYMENT DEBUG]', JSON.stringify({
-      phase,
-      orderId: String(orderId || ''),
-      productId: String(product?._id || ''),
-      title: product?.title || '',
-      qty: item?.qty,
-      itemVariant: item?.variant || null,
-      matchById: matches.byId ? {
-        _id: String(matches.byId._id),
-        sku: matches.byId.sku,
-        options: matches.byId.options || null
-      } : null,
-      matchBySku: matches.bySku ? {
-        _id: String(matches.bySku._id),
-        sku: matches.bySku.sku,
-        options: matches.bySku.options || null
-      } : null,
-      matchByOptions: matches.byOptions ? {
-        _id: String(matches.byOptions._id),
-        sku: matches.byOptions.sku,
-        options: matches.byOptions.options || null
-      } : null
-    }, null, 2))
-  } catch {
-    // no-op
-  }
-}
 
 const normalizeRefundAmount = (orderTotal, amount) => {
   if (!amount) return null
@@ -253,23 +218,8 @@ exports.initPaystackTransaction = async (req, res) => {
         const hasVariant = Array.isArray(product?.variants) && product.variants.length > 0
           && !!(item.variant?._id || item.variant?.sku || item.variant?.size || item.variant?.color)
         const allowBaseFallback = !item.variant?._id && !item.variant?.sku && !item.variant?.size && !item.variant?.color
-        const debugEnabled = shouldDebugOrder(order._id)
-
         const resolvedInfo = await resolveVariantForItem(product, item)
         const resolvedVariant = resolvedInfo.variant
-
-        if (debugEnabled) {
-          const byId = item.variant?._id
-            ? product.variants.find(v => String(v._id) === String(item.variant._id))
-            : null
-          const bySku = !byId && item.variant?.sku
-            ? product.variants.find(v => v.sku === item.variant.sku)
-            : null
-          const byOptions = (!byId && !bySku && (item.variant?.size || item.variant?.color))
-            ? (await findVariantsByOptions(product, item.variant.size, item.variant.color))[0] || null
-            : null
-          logOrderItemDebug('init', order._id, item, product, { byId, bySku, byOptions })
-        }
 
         if (resolvedVariant?._id) {
           const result = await Product.updateOne(
@@ -429,23 +379,8 @@ exports.verifyPaystackPayment = async (req, res) => {
         const hasVariant = Array.isArray(product?.variants) && product.variants.length > 0
           && !!(item.variant?._id || item.variant?.sku || item.variant?.size || item.variant?.color)
         const allowBaseFallback = !item.variant?._id && !item.variant?.sku && !item.variant?.size && !item.variant?.color
-        const debugEnabled = shouldDebugOrder(order._id)
-
         const resolvedInfo = await resolveVariantForItem(product, item)
         const resolvedVariant = resolvedInfo.variant
-
-        if (debugEnabled) {
-          const byId = item.variant?._id
-            ? product.variants.find(v => String(v._id) === String(item.variant._id))
-            : null
-          const bySku = !byId && item.variant?.sku
-            ? product.variants.find(v => v.sku === item.variant.sku)
-            : null
-          const byOptions = (!byId && !bySku && (item.variant?.size || item.variant?.color))
-            ? (await findVariantsByOptions(product, item.variant.size, item.variant.color))[0] || null
-            : null
-          logOrderItemDebug('verify', order._id, item, product, { byId, bySku, byOptions })
-        }
 
         if (resolvedVariant?._id) {
           const result = await Product.updateOne(
@@ -576,23 +511,8 @@ exports.paystackWebHook = async (req, res) => {
       const hasVariant = Array.isArray(product?.variants) && product.variants.length > 0
         && !!(item.variant?._id || item.variant?.sku || item.variant?.size || item.variant?.color)
       const allowBaseFallback = !item.variant?._id && !item.variant?.sku && !item.variant?.size && !item.variant?.color
-      const debugEnabled = shouldDebugOrder(order._id)
-
       const resolvedInfo = await resolveVariantForItem(product, item)
       const resolvedVariant = resolvedInfo.variant
-
-      if (debugEnabled) {
-        const byId = item.variant?._id
-          ? product.variants.find(v => String(v._id) === String(item.variant._id))
-          : null
-        const bySku = !byId && item.variant?.sku
-          ? product.variants.find(v => v.sku === item.variant.sku)
-          : null
-        const byOptions = (!byId && !bySku && (item.variant?.size || item.variant?.color))
-          ? (await findVariantsByOptions(product, item.variant.size, item.variant.color))[0] || null
-          : null
-        logOrderItemDebug('webhook', order._id, item, product, { byId, bySku, byOptions })
-      }
 
       if (resolvedVariant?._id) {
         const result = await Product.updateOne(
