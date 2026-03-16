@@ -618,6 +618,58 @@ exports.addReturnMessage = async (req, res) => {
   }
 }
 
+exports.addReturnMessageUser = async (req, res) => {
+  try {
+    const { message } = req.body || {}
+    const trimmed = String(message || '').trim()
+    if (!trimmed) {
+      return res.status(400).json({ message: 'Message is required' })
+    }
+
+    const order = await Order.findById(req.params.id).populate('user', 'email name')
+    if (!order) return res.status(404).json({ message: 'Order not found' })
+
+    const isOwner = String(order.user?._id || order.user) === String(req.user.id)
+    if (!isOwner) {
+      return res.status(403).json({ message: 'Access denied' })
+    }
+
+    if (!['requested', 'approved'].includes(order.returnStatus)) {
+      return res.status(400).json({ message: 'Messages are only allowed while a return is under review' })
+    }
+
+    order.returnMessages = [
+      ...(order.returnMessages || []),
+      { by: 'customer', message: trimmed.slice(0, 500), status: order.returnStatus || '' }
+    ]
+    await order.save()
+
+    try {
+      if (process.env.ADMIN_EMAIL) {
+        await sendEmail({
+          to: process.env.ADMIN_EMAIL,
+          subject: 'New customer return message - ShopLuxe',
+          title: 'New return message',
+          text: `Order ID: ${order._id}. Message: ${trimmed}`,
+          htmlContent: `
+            <h1>New return message</h1>
+            <p>Order ID: <strong>${order._id}</strong></p>
+            <p>${trimmed}</p>
+          `,
+          preheader: 'A customer sent a return message'
+        })
+      }
+    } catch (emailErr) {
+      console.error('[RETURN USER MESSAGE EMAIL] Failed:', emailErr.message)
+    }
+
+    res.json({ order, message: 'Message sent' })
+  } catch (error) {
+    console.error(error)
+    res.status(500).json({ message: 'Failed to send message' })
+  }
+}
+
 exports.updateOrderStatus = async (req, res) => {
   try {
     if (req.user?.role !== 'admin') {
