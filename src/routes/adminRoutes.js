@@ -8,6 +8,7 @@ const Category = require('../../models/Category')
 const Product = require('../../models/product')
 const Order = require('../../models/order')
 const mongoose = require('mongoose')
+const { releaseOrderReservations } = require('../utils/reservation')
 
 // ✅ Protect all admin routes
 router.use(authCookie, requireAdmin)
@@ -225,6 +226,45 @@ router.get('/export/orders', async (req, res) => {
     } catch (error) {
         console.error('[EXPORT ORDERS]', error)
         res.status(500).json({ message: 'Failed to export orders' })
+    }
+})
+
+// Bulk delete orders (admin only)
+router.post('/orders/delete-bulk', async (req, res) => {
+    const session = await mongoose.startSession()
+    session.startTransaction()
+    try {
+        const { orderIds = [] } = req.body || {}
+        if (!Array.isArray(orderIds) || orderIds.length === 0) {
+            await session.abortTransaction()
+            session.endSession()
+            return res.status(400).json({ message: 'orderIds array is required' })
+        }
+        const ids = orderIds
+            .filter(id => mongoose.isValidObjectId(id))
+            .map(id => new mongoose.Types.ObjectId(id))
+        if (ids.length === 0) {
+            await session.abortTransaction()
+            session.endSession()
+            return res.status(400).json({ message: 'No valid orderIds provided' })
+        }
+
+        const orders = await Order.find({ _id: { $in: ids } }).session(session)
+        for (const order of orders) {
+            if (order.status === 'pending' && order.paymentStatus === 'pending') {
+                await releaseOrderReservations(order, session)
+            }
+        }
+
+        const result = await Order.deleteMany({ _id: { $in: ids } }, { session })
+        await session.commitTransaction()
+        session.endSession()
+        return res.json({ deleted: result.deletedCount || 0 })
+    } catch (error) {
+        await session.abortTransaction()
+        session.endSession()
+        console.error('[ADMIN] Bulk delete orders failed:', error)
+        return res.status(500).json({ message: 'Failed to delete orders' })
     }
 })
 
