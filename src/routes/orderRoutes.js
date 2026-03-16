@@ -4,6 +4,7 @@ const orderCtrl = require('../controllers/orderController')
 
 router.use(auth)
 router.get('/my', orderCtrl.getMyOrder)
+router.get('/pending-reservation', orderCtrl.getPendingReservation)
 router.post('/validate', orderCtrl.validateOrder)
 router.post('/:id/invoice', orderCtrl.generateOrderInvoice)
 router.get('/:id/invoice/download', orderCtrl.downloadOrderInvoice)

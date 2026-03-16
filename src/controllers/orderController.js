@@ -446,6 +446,11 @@ exports.validateOrder = async (req, res) => {
 
 exports.getMyOrder = async (req, res) => {
   try {
+    try {
+      await runOrderReservationCleanupOnce()
+    } catch (cleanupErr) {
+      console.warn('[ORDER LIST] Reservation cleanup skipped:', cleanupErr.message)
+    }
     const orders = await Order.find({ user: req.user.id }).sort({ createdAt: -1 })
     res.json({ orders })
   } catch (error) {
@@ -456,6 +461,11 @@ exports.getMyOrder = async (req, res) => {
 
 exports.getOrderId = async (req, res) => {
   try {
+    try {
+      await runOrderReservationCleanupOnce()
+    } catch (cleanupErr) {
+      console.warn('[ORDER GET] Reservation cleanup skipped:', cleanupErr.message)
+    }
     const order = await Order.findById(req.params.id)
       .populate('items.product')
       .populate('user', 'email name')
@@ -478,6 +488,11 @@ exports.getOrderId = async (req, res) => {
 
 exports.getAllOrders = async (req, res) => {
   try {
+    try {
+      await runOrderReservationCleanupOnce()
+    } catch (cleanupErr) {
+      console.warn('[ORDER ADMIN LIST] Reservation cleanup skipped:', cleanupErr.message)
+    }
     const orders = await Order.find({})
       .populate('user', 'email name')
       .populate('items.product', 'title price')
@@ -487,6 +502,30 @@ exports.getAllOrders = async (req, res) => {
   } catch (error) {
     console.error(error)
     res.status(500).json({ message: 'Server error' })
+  }
+}
+
+exports.getPendingReservation = async (req, res) => {
+  try {
+    try {
+      await runOrderReservationCleanupOnce()
+    } catch (cleanupErr) {
+      console.warn('[ORDER RESERVATION CHECK] Reservation cleanup skipped:', cleanupErr.message)
+    }
+
+    const now = new Date()
+    const order = await Order.findOne({
+      user: req.user.id,
+      status: 'pending',
+      paymentStatus: 'pending',
+      expiresAt: { $exists: true, $gt: now }
+    }).sort({ createdAt: -1 }).select('_id expiresAt')
+
+    if (!order) return res.json({ reservation: null })
+    res.json({ reservation: { orderId: order._id, expiresAt: order.expiresAt } })
+  } catch (error) {
+    console.error(error)
+    res.status(500).json({ message: 'Failed to fetch reservation' })
   }
 }
 
