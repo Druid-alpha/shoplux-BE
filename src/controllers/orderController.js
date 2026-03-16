@@ -639,9 +639,18 @@ exports.addReturnMessageUser = async (req, res) => {
       return res.status(400).json({ message: 'Messages are only allowed while a return is under review' })
     }
 
-    const files = Array.isArray(attachments)
+    let files = Array.isArray(attachments)
       ? attachments.map((u) => String(u || '').trim()).filter(Boolean).slice(0, 5)
       : []
+
+    if (Array.isArray(req.files) && req.files.length > 0) {
+      const uploadedUrls = []
+      for (const file of req.files.slice(0, 5)) {
+        const uploaded = await uploadToCloudinary(file.buffer, 'returns')
+        uploadedUrls.push(uploaded.secure_url)
+      }
+      files = uploadedUrls
+    }
 
     order.returnMessages = [
       ...(order.returnMessages || []),
@@ -672,6 +681,71 @@ exports.addReturnMessageUser = async (req, res) => {
   } catch (error) {
     console.error(error)
     res.status(500).json({ message: 'Failed to send message' })
+  }
+}
+
+exports.getReservationDebug = async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id).populate('user', 'email name')
+    if (!order) return res.status(404).json({ message: 'Order not found' })
+
+    const isAdmin = req.user?.role === 'admin'
+    const isOwner = String(order.user?._id || order.user) === String(req.user.id)
+    if (!isAdmin && !isOwner) {
+      return res.status(403).json({ message: 'Access denied' })
+    }
+
+    const details = []
+    for (const item of order.items || []) {
+      const product = await Product.findById(item.product).select('title stock reserved variants').lean()
+      if (!product) continue
+      let variantMatch = null
+      if (item.variant?._id || item.variant?.sku) {
+        variantMatch = item.variant?._id
+          ? product.variants.find(v => String(v._id) === String(item.variant._id))
+          : product.variants.find(v => v.sku === item.variant.sku)
+      } else if (item.variant?.size || item.variant?.color) {
+        const sizeKey = String(item.variant.size || '').trim()
+        const colorId = await resolveColorRef(item.variant.color)
+        const colorKey = colorId?.id || colorId?.label || null
+        variantMatch = product.variants.find(v => {
+          const vSize = String(v?.options?.size || '').trim()
+          const vColor = String(v?.options?.color || '')
+          if (colorKey && sizeKey) return vSize === sizeKey && (vColor === colorKey || vColor === String(colorId?.id || ''))
+          if (colorKey) return vColor === colorKey || vColor === String(colorId?.id || '')
+          if (sizeKey) return vSize === sizeKey
+          return false
+        })
+      }
+
+      details.push({
+        productId: String(product._id),
+        title: product.title,
+        baseReserved: Number(product.reserved || 0),
+        baseStock: Number(product.stock || 0),
+        variant: item.variant || null,
+        matchedVariant: variantMatch
+          ? {
+              _id: String(variantMatch._id),
+              sku: variantMatch.sku,
+              reserved: Number(variantMatch.reserved || 0),
+              stock: Number(variantMatch.stock || 0),
+              options: variantMatch.options || null
+            }
+          : null
+      })
+    }
+
+    res.json({
+      orderId: String(order._id),
+      status: order.status,
+      paymentStatus: order.paymentStatus,
+      expiresAt: order.expiresAt,
+      items: details
+    })
+  } catch (error) {
+    console.error(error)
+    res.status(500).json({ message: 'Failed to fetch reservation debug' })
   }
 }
 
