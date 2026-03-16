@@ -736,6 +736,96 @@ exports.getReservationDebug = async (req, res) => {
   }
 }
 
+exports.getPaymentVariantDebug = async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id).populate('user', 'email name')
+    if (!order) return res.status(404).json({ message: 'Order not found' })
+
+    const isAdmin = req.user?.role === 'admin'
+    const isOwner = String(order.user?._id || order.user) === String(req.user.id)
+    if (!isAdmin && !isOwner) {
+      return res.status(403).json({ message: 'Access denied' })
+    }
+
+    const items = []
+    for (const item of order.items || []) {
+      const product = await Product.findById(item.product).select('title stock reserved variants').lean()
+      if (!product) continue
+
+      let matchById = null
+      let matchBySku = null
+      let matchByOptions = null
+      const variant = item.variant || {}
+      const hasId = !!variant?._id
+      const hasSku = !!variant?.sku
+
+      if (hasId) {
+        matchById = product.variants.find(v => String(v._id) === String(variant._id)) || null
+      }
+      if (!matchById && hasSku) {
+        matchBySku = product.variants.find(v => v.sku === variant.sku) || null
+      }
+
+      if (!hasId && !hasSku && (variant?.size || variant?.color)) {
+        const sizeKey = String(variant.size || '').trim()
+        const colorInfo = await resolveColorRef(variant.color)
+        const colorProvided = colorInfo.provided
+        const colorId = colorInfo.id
+        const productHasColoredVariants = product.variants.some(v => v?.options?.color)
+
+        if ((sizeKey || colorProvided) && !(colorProvided && !colorId) && !(sizeKey && !colorProvided && productHasColoredVariants)) {
+          matchByOptions = product.variants.find(v => {
+            const vSize = String(v?.options?.size || '').trim()
+            const vColorId = String(v?.options?.color || '')
+            if (sizeKey && colorId) return vSize === sizeKey && vColorId === colorId
+            if (sizeKey && !colorProvided) return vSize === sizeKey
+            if (!sizeKey && colorId) return vColorId === colorId
+            return false
+          }) || null
+        }
+      }
+
+      const matched = matchById || matchBySku || matchByOptions || null
+      const matches = product.variants.filter(v => {
+        if (matchById && String(v._id) === String(matchById._id)) return true
+        if (matchBySku && v.sku === matchBySku.sku) return true
+        if (matchByOptions && String(v._id) === String(matchByOptions._id)) return true
+        return false
+      })
+
+      items.push({
+        productId: String(product._id),
+        title: product.title,
+        orderItem: {
+          qty: item.qty,
+          variant: item.variant || null
+        },
+        match: matched
+          ? {
+              _id: String(matched._id),
+              sku: matched.sku,
+              stock: Number(matched.stock || 0),
+              reserved: Number(matched.reserved || 0),
+              options: matched.options || null
+            }
+          : null,
+        matchSource: matchById ? 'id' : matchBySku ? 'sku' : matchByOptions ? 'options' : 'none',
+        ambiguous: matches.length > 1
+      })
+    }
+
+    res.json({
+      orderId: String(order._id),
+      status: order.status,
+      paymentStatus: order.paymentStatus,
+      items
+    })
+  } catch (error) {
+    console.error(error)
+    res.status(500).json({ message: 'Failed to fetch payment debug' })
+  }
+}
+
 exports.uploadReturnAttachmentsUser = async (req, res) => {
   try {
     const order = await Order.findById(req.params.id)
