@@ -147,6 +147,35 @@ exports.initPaystackTransaction = async (req, res) => {
 
     const reference = `ORD_${order._id}_${Date.now()}`
 
+    // Release any other pending reservations for this user to avoid stacked holds.
+    const otherPending = await Order.find({
+      _id: { $ne: order._id },
+      user: userId,
+      status: 'pending',
+      paymentStatus: 'pending'
+    }).select('_id items')
+
+    if (otherPending.length) {
+      const cleanupSession = await mongoose.startSession()
+      cleanupSession.startTransaction()
+      try {
+        for (const pending of otherPending) {
+          await releaseOrderReservations(pending, cleanupSession)
+          await Order.updateOne(
+            { _id: pending._id },
+            { $set: { status: 'cancelled', paymentStatus: 'failed' } },
+            { session: cleanupSession }
+          )
+        }
+        await cleanupSession.commitTransaction()
+      } catch (cleanupErr) {
+        await cleanupSession.abortTransaction()
+        console.warn('[PAYSTACK INIT] Pending reservation cleanup failed:', cleanupErr.message)
+      } finally {
+        cleanupSession.endSession()
+      }
+    }
+
     // Reserve stock only when payment is initiated.
     const reserveSession = await mongoose.startSession()
     reserveSession.startTransaction()

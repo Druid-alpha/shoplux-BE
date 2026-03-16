@@ -184,13 +184,7 @@ exports.createOrder = async (req, res) => {
     const pendingOrders = await Order.find({
       user: req.user.id,
       status: 'pending',
-      paymentStatus: 'pending',
-      $or: [
-        { paymentRef: { $exists: false } },
-        { paymentRef: null },
-        { paymentRef: '' },
-        { expiresAt: { $lt: now } }
-      ]
+      paymentStatus: 'pending'
     }).select('_id items')
 
     if (pendingOrders.length) {
@@ -341,13 +335,7 @@ exports.validateOrder = async (req, res) => {
     const pendingOrders = await Order.find({
       user: req.user.id,
       status: 'pending',
-      paymentStatus: 'pending',
-      $or: [
-        { paymentRef: { $exists: false } },
-        { paymentRef: null },
-        { paymentRef: '' },
-        { expiresAt: { $lt: now } }
-      ]
+      paymentStatus: 'pending'
     }).select('_id items')
 
     if (pendingOrders.length) {
@@ -520,7 +508,7 @@ exports.getPendingReservation = async (req, res) => {
       status: 'pending',
       paymentStatus: 'pending',
       expiresAt: { $exists: true, $gt: now }
-    }).sort({ createdAt: -1 }).select('_id expiresAt')
+    }).sort({ expiresAt: -1, createdAt: -1 }).select('_id expiresAt')
 
     if (!order) return res.json({ reservation: null })
     res.json({ reservation: { orderId: order._id, expiresAt: order.expiresAt } })
