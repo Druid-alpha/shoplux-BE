@@ -49,11 +49,18 @@ async function releaseOrderReservations(order, session) {
         ? { 'variants._id': item.variant._id }
         : { 'variants.sku': item.variant.sku }
 
-      await Product.updateOne(
+      const result = await Product.updateOne(
         { _id: productId, ...match },
         { $inc: { 'variants.$.reserved': -item.qty } },
         { session }
       )
+      if (result.modifiedCount === 0) {
+        await Product.updateOne(
+          { _id: productId },
+          { $inc: { reserved: -item.qty } },
+          { session }
+        )
+      }
       await clampReservedToZero(productId, session)
     } else {
       const sizeKey = String(item.variant?.size || '').trim()
