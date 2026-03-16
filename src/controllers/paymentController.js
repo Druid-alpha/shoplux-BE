@@ -62,6 +62,10 @@ exports.refundPaystackPayment = async (req, res) => {
     }
     if (reason) {
       order.returnNote = String(reason).slice(0, 500)
+      order.returnMessages = [
+        ...(order.returnMessages || []),
+        { by: 'admin', message: order.returnNote, status: 'refunded' }
+      ]
     }
     await order.save()
 

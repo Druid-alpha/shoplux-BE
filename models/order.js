@@ -24,6 +24,13 @@ const shippingAddressSchema = new mongoose.Schema({
   state: String,
 }, { _id: false })
 
+const returnMessageSchema = new mongoose.Schema({
+  by: { type: String, enum: ['customer', 'admin'], required: true },
+  message: { type: String, required: true },
+  status: { type: String, default: '' },
+  createdAt: { type: Date, default: Date.now }
+}, { _id: false })
+
 const orderSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   items: [orderItemSchema],
@@ -39,6 +46,7 @@ const orderSchema = new mongoose.Schema({
   returnRequestedAt: { type: Date, default: null },
   returnReason: { type: String, default: '' },
   returnNote: { type: String, default: '' },
+  returnMessages: { type: [returnMessageSchema], default: [] },
   refundStatus: { type: String, enum: ['none', 'pending', 'processed'], default: 'none' },
   refundAmount: { type: Number, default: 0 },
   refundProcessedAt: { type: Date, default: null }

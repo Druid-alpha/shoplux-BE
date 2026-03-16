@@ -533,8 +533,8 @@ exports.cancelPendingReservations = async (req, res) => {
   try {
     const orders = await Order.find({
       user: req.user.id,
-      status: 'pending',
-      paymentStatus: 'pending'
+      status: { $in: ['pending', 'failed', 'cancelled'] },
+      paymentStatus: { $in: ['pending', 'failed'] }
     }).select('_id items')
 
     if (!orders.length) {
@@ -566,6 +566,55 @@ exports.cancelPendingReservations = async (req, res) => {
   } catch (error) {
     console.error(error)
     res.status(500).json({ message: 'Failed to cancel reservations' })
+  }
+}
+
+exports.addReturnMessage = async (req, res) => {
+  try {
+    if (req.user?.role !== 'admin') {
+      return res.status(403).json({ message: 'Access denied: Admins only' })
+    }
+
+    const { message } = req.body || {}
+    const trimmed = String(message || '').trim()
+    if (!trimmed) {
+      return res.status(400).json({ message: 'Message is required' })
+    }
+
+    const order = await Order.findById(req.params.id).populate('user', 'email name')
+    if (!order) return res.status(404).json({ message: 'Order not found' })
+
+    order.returnMessages = [
+      ...(order.returnMessages || []),
+      { by: 'admin', message: trimmed.slice(0, 500), status: order.returnStatus || '' }
+    ]
+    order.returnNote = trimmed.slice(0, 500)
+    await order.save()
+
+    try {
+      if (order.user?.email) {
+        await sendEmail({
+          to: order.user.email,
+          subject: 'Return update - ShopLuxe',
+          title: 'Return update',
+          text: `Message from support on your return request. Order ID: ${order._id}. ${order.returnNote}`,
+          htmlContent: `
+            <h1>Message from support</h1>
+            <p>Order ID: <strong>${order._id}</strong></p>
+            <p>${order.returnNote}</p>
+            <p><a class="button" href="${process.env.CLIENT_URL}/orders/${order._id}">View Order</a></p>
+          `,
+          preheader: 'New message about your return'
+        })
+      }
+    } catch (emailErr) {
+      console.error('[RETURN MESSAGE EMAIL] Failed:', emailErr.message)
+    }
+
+    res.json({ order, message: 'Message sent' })
+  } catch (error) {
+    console.error(error)
+    res.status(500).json({ message: 'Failed to send message' })
   }
 }
 
@@ -650,6 +699,10 @@ exports.requestReturn = async (req, res) => {
     order.returnStatus = 'requested'
     order.returnRequestedAt = new Date()
     order.returnReason = trimmedReason.slice(0, 500)
+    order.returnMessages = [
+      ...(order.returnMessages || []),
+      { by: 'customer', message: order.returnReason, status: 'requested' }
+    ]
     await order.save()
 
     res.json({ order, message: 'Return request submitted' })
@@ -675,6 +728,12 @@ exports.updateReturnStatus = async (req, res) => {
 
     order.returnStatus = status
     order.returnNote = String(note || '').slice(0, 500)
+    if (order.returnNote) {
+      order.returnMessages = [
+        ...(order.returnMessages || []),
+        { by: 'admin', message: order.returnNote, status }
+      ]
+    }
 
     if (status === 'refunded') {
       order.refundStatus = 'processed'
