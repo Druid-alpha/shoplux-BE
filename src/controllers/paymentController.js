@@ -13,6 +13,41 @@ const sendEmail = require('../utils/sendEmail')
 const { clampReservedToZero, releaseOrderReservations, resolveColorId } = require('../utils/reservation')
 
 const PAYMENT_RESERVATION_EXTENSION_MS = 10 * 60 * 1000
+const shouldDebugOrder = (orderId) => {
+  const target = String(process.env.DEBUG_ORDER_ID || '').trim()
+  if (!target) return false
+  return String(orderId || '') === target
+}
+
+const logOrderItemDebug = (phase, orderId, item, product, matches = {}) => {
+  try {
+    console.log('[PAYMENT DEBUG]', JSON.stringify({
+      phase,
+      orderId: String(orderId || ''),
+      productId: String(product?._id || ''),
+      title: product?.title || '',
+      qty: item?.qty,
+      itemVariant: item?.variant || null,
+      matchById: matches.byId ? {
+        _id: String(matches.byId._id),
+        sku: matches.byId.sku,
+        options: matches.byId.options || null
+      } : null,
+      matchBySku: matches.bySku ? {
+        _id: String(matches.bySku._id),
+        sku: matches.bySku.sku,
+        options: matches.bySku.options || null
+      } : null,
+      matchByOptions: matches.byOptions ? {
+        _id: String(matches.byOptions._id),
+        sku: matches.byOptions.sku,
+        options: matches.byOptions.options || null
+      } : null
+    }, null, 2))
+  } catch {
+    // no-op
+  }
+}
 
 const normalizeRefundAmount = (orderTotal, amount) => {
   if (!amount) return null
@@ -98,17 +133,17 @@ exports.refundPaystackPayment = async (req, res) => {
   }
 }
 
-const findVariantByOptions = async (product, size, color) => {
-  if (!product?.variants?.length) return null
+const findVariantsByOptions = async (product, size, color) => {
+  if (!product?.variants?.length) return []
   const sizeKey = String(size || '').trim()
   const colorProvided = color !== null && color !== undefined && String(color).trim() !== ''
   const colorId = await resolveColorId(color)
   const hasColoredVariants = product.variants.some(v => v?.options?.color)
 
-  if (!sizeKey && !colorId) return null
-  if (colorProvided && !colorId && hasColoredVariants) return null
+  if (!sizeKey && !colorId) return []
+  if (colorProvided && !colorId && hasColoredVariants) return []
 
-  return product.variants.find(v => {
+  return product.variants.filter(v => {
     const vSize = String(v?.options?.size || '').trim()
     const vColor = String(v?.options?.color?._id || v?.options?.color || '')
     if (sizeKey && colorId) return vSize === sizeKey && vColor === colorId
@@ -116,7 +151,37 @@ const findVariantByOptions = async (product, size, color) => {
     if (sizeKey && !colorProvided) return vSize === sizeKey
     if (sizeKey && !colorId && !hasColoredVariants) return vSize === sizeKey
     return false
-  }) || null
+  })
+}
+
+const resolveVariantForItem = async (product, item) => {
+  if (!product?.variants?.length) return { variant: null, reason: 'no_variants' }
+  const variant = item?.variant || {}
+  const hasId = !!variant?._id
+  const hasSku = !!variant?.sku
+  const hasOptions = !!(variant?.size || variant?.color)
+
+  if (hasId) {
+    const match = product.variants.find(v => String(v._id) === String(variant._id)) || null
+    if (!match) return { variant: null, reason: 'missing_id' }
+    return { variant: match, reason: 'id' }
+  }
+
+  if (hasSku) {
+    const matches = product.variants.filter(v => v.sku === variant.sku)
+    if (matches.length === 1) return { variant: matches[0], reason: 'sku' }
+    if (matches.length > 1) return { variant: null, reason: 'ambiguous_sku' }
+    return { variant: null, reason: 'missing_sku' }
+  }
+
+  if (hasOptions) {
+    const matches = await findVariantsByOptions(product, variant.size, variant.color)
+    if (matches.length === 1) return { variant: matches[0], reason: 'options' }
+    if (matches.length > 1) return { variant: null, reason: 'ambiguous_options' }
+    return { variant: null, reason: 'missing_options' }
+  }
+
+  return { variant: null, reason: 'no_variant' }
 }
 
 /* ================================================================
@@ -187,58 +252,42 @@ exports.initPaystackTransaction = async (req, res) => {
         let reserved = false
         const hasVariant = Array.isArray(product?.variants) && product.variants.length > 0
           && !!(item.variant?._id || item.variant?.sku || item.variant?.size || item.variant?.color)
-        const hasExplicitVariant = !!(item.variant?._id || item.variant?.sku)
         const allowBaseFallback = !item.variant?._id && !item.variant?.sku && !item.variant?.size && !item.variant?.color
+        const debugEnabled = shouldDebugOrder(order._id)
 
-        if (item.variant?._id) {
+        const resolvedInfo = await resolveVariantForItem(product, item)
+        const resolvedVariant = resolvedInfo.variant
+
+        if (debugEnabled) {
+          const byId = item.variant?._id
+            ? product.variants.find(v => String(v._id) === String(item.variant._id))
+            : null
+          const bySku = !byId && item.variant?.sku
+            ? product.variants.find(v => v.sku === item.variant.sku)
+            : null
+          const byOptions = (!byId && !bySku && (item.variant?.size || item.variant?.color))
+            ? (await findVariantsByOptions(product, item.variant.size, item.variant.color))[0] || null
+            : null
+          logOrderItemDebug('init', order._id, item, product, { byId, bySku, byOptions })
+        }
+
+        if (resolvedVariant?._id) {
           const result = await Product.updateOne(
             {
               _id: product._id,
-              "variants._id": item.variant._id,
+              "variants._id": resolvedVariant._id,
               "variants.stock": { $gte: item.qty },
-              "variants.reserved": { $lte: (product.variants.id(item.variant._id)?.stock || 0) - item.qty }
+              "variants.reserved": { $lte: (resolvedVariant?.stock || 0) - item.qty }
             },
             { $inc: { "variants.$.reserved": item.qty } },
             { session: reserveSession }
           )
           if (result.modifiedCount > 0) reserved = true
-        }
-
-        if (!reserved && item.variant?.sku) {
-          const variant = product.variants.find(v => v.sku === item.variant.sku)
-          const result = await Product.updateOne(
-            {
-              _id: product._id,
-              "variants.sku": item.variant.sku,
-              "variants.stock": { $gte: item.qty },
-              "variants.reserved": { $lte: (variant?.stock || 0) - item.qty }
-            },
-            { $inc: { "variants.$.reserved": item.qty } },
-            { session: reserveSession }
-          )
-          if (result.modifiedCount > 0) reserved = true
-        }
-
-        if (!reserved && !hasExplicitVariant && (item.variant?.size || item.variant?.color)) {
-          const resolved = await findVariantByOptions(product, item.variant.size, item.variant.color)
-          if (resolved?._id) {
-            const result = await Product.updateOne(
-              {
-                _id: product._id,
-                "variants._id": resolved._id,
-                "variants.stock": { $gte: item.qty },
-                "variants.reserved": { $lte: (resolved?.stock || 0) - item.qty }
-              },
-              { $inc: { "variants.$.reserved": item.qty } },
-              { session: reserveSession }
-            )
-            if (result.modifiedCount > 0) reserved = true
-          }
         }
 
         if (!reserved && hasVariant) {
           if (!allowBaseFallback || Number(product.stock || 0) < item.qty) {
-            throw new Error('Variant not found or insufficient stock')
+            throw new Error(`Variant not found or insufficient stock (${resolvedInfo.reason})`)
           }
         }
 
@@ -375,54 +424,41 @@ exports.verifyPaystackPayment = async (req, res) => {
         let variantUpdated = false
         const hasVariant = Array.isArray(product?.variants) && product.variants.length > 0
           && !!(item.variant?._id || item.variant?.sku || item.variant?.size || item.variant?.color)
-        const hasExplicitVariant = !!(item.variant?._id || item.variant?.sku)
         const allowBaseFallback = !item.variant?._id && !item.variant?.sku && !item.variant?.size && !item.variant?.color
+        const debugEnabled = shouldDebugOrder(order._id)
 
-        if (item.variant?._id) {
+        const resolvedInfo = await resolveVariantForItem(product, item)
+        const resolvedVariant = resolvedInfo.variant
+
+        if (debugEnabled) {
+          const byId = item.variant?._id
+            ? product.variants.find(v => String(v._id) === String(item.variant._id))
+            : null
+          const bySku = !byId && item.variant?.sku
+            ? product.variants.find(v => v.sku === item.variant.sku)
+            : null
+          const byOptions = (!byId && !bySku && (item.variant?.size || item.variant?.color))
+            ? (await findVariantsByOptions(product, item.variant.size, item.variant.color))[0] || null
+            : null
+          logOrderItemDebug('verify', order._id, item, product, { byId, bySku, byOptions })
+        }
+
+        if (resolvedVariant?._id) {
           const result = await Product.updateOne(
             {
               _id: product._id,
-              "variants._id": item.variant._id,
+              "variants._id": resolvedVariant._id,
               "variants.stock": { $gte: item.qty }
             },
             { $inc: { "variants.$.stock": -item.qty, "variants.$.reserved": -item.qty } },
             { session }
           )
           if (result.modifiedCount > 0) variantUpdated = true
-        }
-
-        if (!variantUpdated && item.variant?.sku) {
-          const result = await Product.updateOne(
-            {
-              _id: product._id,
-              "variants.sku": item.variant.sku,
-              "variants.stock": { $gte: item.qty }
-            },
-            { $inc: { "variants.$.stock": -item.qty, "variants.$.reserved": -item.qty } },
-            { session }
-          )
-          if (result.modifiedCount > 0) variantUpdated = true
-        }
-
-        if (!variantUpdated && !hasExplicitVariant && (item.variant?.size || item.variant?.color)) {
-          const resolved = await findVariantByOptions(product, item.variant.size, item.variant.color)
-          if (resolved?._id) {
-            const result = await Product.updateOne(
-              {
-                _id: product._id,
-                "variants._id": resolved._id,
-                "variants.stock": { $gte: item.qty }
-              },
-              { $inc: { "variants.$.stock": -item.qty, "variants.$.reserved": -item.qty } },
-              { session }
-            )
-            if (result.modifiedCount > 0) variantUpdated = true
-          }
         }
 
         if (!variantUpdated && hasVariant) {
           if (!allowBaseFallback || Number(product.stock || 0) < item.qty) {
-            throw new Error('Variant not found or insufficient stock')
+            throw new Error(`Variant not found or insufficient stock (${resolvedInfo.reason})`)
           }
         }
 
@@ -531,68 +567,53 @@ exports.paystackWebHook = async (req, res) => {
       let variantUpdated = false
       const hasVariant = Array.isArray(product?.variants) && product.variants.length > 0
         && !!(item.variant?._id || item.variant?.sku || item.variant?.size || item.variant?.color)
-      const hasExplicitVariant = !!(item.variant?._id || item.variant?.sku)
       const allowBaseFallback = !item.variant?._id && !item.variant?.sku && !item.variant?.size && !item.variant?.color
+      const debugEnabled = shouldDebugOrder(order._id)
 
-        if (item.variant?._id) {
-          const result = await Product.updateOne(
-            {
-              _id: product._id,
-              "variants._id": item.variant._id,
-              "variants.stock": { $gte: item.qty }
-            },
-            { $inc: { "variants.$.stock": -item.qty, "variants.$.reserved": -item.qty } },
-            { session }
-          )
-          if (result.modifiedCount === 0) throw new Error("Stock conflict (variant sold out)")
-          variantUpdated = true
-        }
+      const resolvedInfo = await resolveVariantForItem(product, item)
+      const resolvedVariant = resolvedInfo.variant
 
-        if (!variantUpdated && item.variant?.sku) {
-          const result = await Product.updateOne(
-            {
-              _id: product._id,
-              "variants.sku": item.variant.sku,
-              "variants.stock": { $gte: item.qty }
-            },
-            { $inc: { "variants.$.stock": -item.qty, "variants.$.reserved": -item.qty } },
-            { session }
-          )
-          if (result.modifiedCount === 0) throw new Error("Stock conflict (variant sold out)")
-          variantUpdated = true
-        }
+      if (debugEnabled) {
+        const byId = item.variant?._id
+          ? product.variants.find(v => String(v._id) === String(item.variant._id))
+          : null
+        const bySku = !byId && item.variant?.sku
+          ? product.variants.find(v => v.sku === item.variant.sku)
+          : null
+        const byOptions = (!byId && !bySku && (item.variant?.size || item.variant?.color))
+          ? (await findVariantsByOptions(product, item.variant.size, item.variant.color))[0] || null
+          : null
+        logOrderItemDebug('webhook', order._id, item, product, { byId, bySku, byOptions })
+      }
 
-        if (!variantUpdated && !hasExplicitVariant && (item.variant?.size || item.variant?.color)) {
-          const resolved = await findVariantByOptions(product, item.variant.size, item.variant.color)
-          if (resolved?._id) {
-            const result = await Product.updateOne(
-              {
-                _id: product._id,
-                "variants._id": resolved._id,
-                "variants.stock": { $gte: item.qty }
-              },
-              { $inc: { "variants.$.stock": -item.qty, "variants.$.reserved": -item.qty } },
-              { session }
-            )
-            if (result.modifiedCount === 0) throw new Error("Stock conflict (variant sold out)")
-            variantUpdated = true
-          }
-        }
+      if (resolvedVariant?._id) {
+        const result = await Product.updateOne(
+          {
+            _id: product._id,
+            "variants._id": resolvedVariant._id,
+            "variants.stock": { $gte: item.qty }
+          },
+          { $inc: { "variants.$.stock": -item.qty, "variants.$.reserved": -item.qty } },
+          { session }
+        )
+        if (result.modifiedCount === 0) throw new Error("Stock conflict (variant sold out)")
+        variantUpdated = true
+      }
 
-        if (!variantUpdated && hasVariant) {
-          if (!allowBaseFallback || Number(product.stock || 0) < item.qty) {
-            throw new Error("Variant not found or insufficient stock")
-          }
+      if (!variantUpdated && hasVariant) {
+        if (!allowBaseFallback || Number(product.stock || 0) < item.qty) {
+          throw new Error(`Variant not found or insufficient stock (${resolvedInfo.reason})`)
         }
+      }
 
-        if (!variantUpdated) {
-          const result = await Product.updateOne(
-            { _id: product._id, stock: { $gte: item.qty } },
-            { $inc: { stock: -item.qty, reserved: -item.qty } },
-            { session }
-          )
-          if (result.modifiedCount === 0) throw new Error("Stock conflict (product sold out)")
-        }
+      if (!variantUpdated) {
+        const result = await Product.updateOne(
+          { _id: product._id, stock: { $gte: item.qty } },
+          { $inc: { stock: -item.qty, reserved: -item.qty } },
+          { session }
+        )
+        if (result.modifiedCount === 0) throw new Error("Stock conflict (product sold out)")
+      }
 
         await clampReservedToZero(product._id, session)
       }
