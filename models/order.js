@@ -26,6 +26,7 @@ const shippingAddressSchema = new mongoose.Schema({
 
 const returnMessageSchema = new mongoose.Schema({
   by: { type: String, enum: ['customer', 'admin'], required: true },
+  attachments: { type: [String], default: [] },
   message: { type: String, required: true },
   status: { type: String, default: '' },
   createdAt: { type: Date, default: Date.now }

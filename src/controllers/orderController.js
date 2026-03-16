@@ -9,6 +9,7 @@ const fs = require('fs')
 const os = require('os')
 const PDFDocument = require('pdfkit')
 const cloudinary = require('../config/cloudinary')
+const { uploadToCloudinary } = require('../middleware/uploadMiddleware')
 const { runOrderReservationCleanupOnce } = require('../jobs/orderReservationCleanupJob')
 const { releaseOrderReservations } = require('../utils/reservation')
 const sendEmail = require('../utils/sendEmail')
@@ -620,7 +621,7 @@ exports.addReturnMessage = async (req, res) => {
 
 exports.addReturnMessageUser = async (req, res) => {
   try {
-    const { message } = req.body || {}
+    const { message, attachments } = req.body || {}
     const trimmed = String(message || '').trim()
     if (!trimmed) {
       return res.status(400).json({ message: 'Message is required' })
@@ -638,9 +639,13 @@ exports.addReturnMessageUser = async (req, res) => {
       return res.status(400).json({ message: 'Messages are only allowed while a return is under review' })
     }
 
+    const files = Array.isArray(attachments)
+      ? attachments.map((u) => String(u || '').trim()).filter(Boolean).slice(0, 5)
+      : []
+
     order.returnMessages = [
       ...(order.returnMessages || []),
-      { by: 'customer', message: trimmed.slice(0, 500), status: order.returnStatus || '' }
+      { by: 'customer', message: trimmed.slice(0, 500), status: order.returnStatus || '', attachments: files }
     ]
     await order.save()
 
@@ -667,6 +672,38 @@ exports.addReturnMessageUser = async (req, res) => {
   } catch (error) {
     console.error(error)
     res.status(500).json({ message: 'Failed to send message' })
+  }
+}
+
+exports.uploadReturnAttachmentsUser = async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id)
+    if (!order) return res.status(404).json({ message: 'Order not found' })
+
+    const isOwner = String(order.user) === String(req.user.id)
+    if (!isOwner) {
+      return res.status(403).json({ message: 'Access denied' })
+    }
+
+    if (!['requested', 'approved'].includes(order.returnStatus)) {
+      return res.status(400).json({ message: 'Attachments are only allowed while a return is under review' })
+    }
+
+    const files = Array.isArray(req.files) ? req.files.slice(0, 5) : []
+    if (files.length === 0) {
+      return res.status(400).json({ message: 'No files uploaded' })
+    }
+
+    const uploads = []
+    for (const file of files) {
+      const uploaded = await uploadToCloudinary(file.buffer, 'returns')
+      uploads.push(uploaded.secure_url)
+    }
+
+    res.json({ attachments: uploads })
+  } catch (error) {
+    console.error(error)
+    res.status(500).json({ message: 'Failed to upload attachments' })
   }
 }
 
