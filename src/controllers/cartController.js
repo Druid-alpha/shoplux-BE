@@ -114,6 +114,18 @@ exports.getCart = async (req, res) => {
   }
 
   await attachColorMeta(user.cart);
+  user.cart.forEach(item => {
+    const product = item?.product;
+    if (!product) return;
+    const variants = Array.isArray(product.variants) ? product.variants : [];
+    const baseStock = Number(product.stock || 0);
+    const baseReserved = Number(product.reserved || 0);
+    const variantStock = variants.reduce((sum, v) => sum + Number(v?.stock || 0), 0);
+    const variantReserved = variants.reduce((sum, v) => sum + Number(v?.reserved || 0), 0);
+    product.totalStock = baseStock + variantStock;
+    product.totalReserved = baseReserved + variantReserved;
+    product.availableStock = Math.max(0, product.totalStock - product.totalReserved);
+  });
   res.json({ cart: user.cart });
 };
 
