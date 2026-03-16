@@ -218,9 +218,11 @@ exports.createOrder = async (req, res) => {
 
       let variantData = null
       const cartVariant = cartItem.variant || {}
-      const cartVariantSku = cartVariant.sku || null
-      const cartVariantSize = cartVariant.size || null
-      const cartVariantColor = cartVariant.color || null
+      const cartVariantSku = typeof cartVariant === 'string'
+        ? cartVariant
+        : (cartVariant.sku || null)
+      const cartVariantSize = typeof cartVariant === 'object' ? cartVariant.size || null : null
+      const cartVariantColor = typeof cartVariant === 'object' ? cartVariant.color || null : null
       let resolvedVariant = null
       if (cartVariant && (cartVariant._id || cartVariantSku)) {
         resolvedVariant = product.variants.find(
@@ -232,11 +234,7 @@ exports.createOrder = async (req, res) => {
         resolvedVariant = await findVariantByOptions(product, cartVariantSize, cartVariantColor)
       }
       if (!resolvedVariant && product.variants?.length && (cartVariantSize || cartVariantColor)) {
-        // If no SKU/_id and base stock exists, allow base purchase even when variants exist.
-        const availableBaseForFallback = Number(product.stock || 0) - Number(product.reserved || 0)
-        if (availableBaseForFallback < cartItem.qty) {
-          throw new Error('Variant not found')
-        }
+        throw new Error('Variant not found')
       }
 
       if (resolvedVariant) {
@@ -369,9 +367,11 @@ exports.validateOrder = async (req, res) => {
       }
 
       const cartVariant = cartItem.variant || {}
-      const cartVariantSku = cartVariant.sku || null
-      const cartVariantSize = cartVariant.size || null
-      const cartVariantColor = cartVariant.color || null
+      const cartVariantSku = typeof cartVariant === 'string'
+        ? cartVariant
+        : (cartVariant.sku || null)
+      const cartVariantSize = typeof cartVariant === 'object' ? cartVariant.size || null : null
+      const cartVariantColor = typeof cartVariant === 'object' ? cartVariant.color || null : null
       let resolvedVariant = null
 
       if (cartVariant && (cartVariant._id || cartVariantSku)) {
@@ -383,16 +383,13 @@ exports.validateOrder = async (req, res) => {
         resolvedVariant = await findVariantByOptions(product, cartVariantSize, cartVariantColor)
       }
       if (!resolvedVariant && product.variants?.length && (cartVariantSize || cartVariantColor)) {
-        const availableBaseForFallback = Number(product.stock || 0) - Number(product.reserved || 0)
-        if (availableBaseForFallback < cartItem.qty) {
-          errors.push({
-            productId: product._id,
-            title: product.title,
-            message: 'Variant not found',
-            available: 0
-          })
-          continue
-        }
+        errors.push({
+          productId: product._id,
+          title: product.title,
+          message: 'Variant not found',
+          available: 0
+        })
+        continue
       }
 
       if (resolvedVariant) {
