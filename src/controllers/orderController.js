@@ -132,8 +132,8 @@ const resolveColorRef = async (raw) => {
   return { provided: true, id: null, label }
 }
 
-const findVariantByOptions = async (product, size, color) => {
-  if (!product?.variants?.length) return null
+const findVariantsByOptions = async (product, size, color) => {
+  if (!product?.variants?.length) return []
 
   const sizeKey = String(size || '')
   const colorInfo = await resolveColorRef(color)
@@ -141,11 +141,11 @@ const findVariantByOptions = async (product, size, color) => {
   const colorId = colorInfo.id
   const productHasColoredVariants = product.variants.some(v => v?.options?.color)
 
-  if (!sizeKey && !colorProvided) return null
-  if (colorProvided && !colorId) return null
-  if (!colorProvided && sizeKey && productHasColoredVariants) return null
+  if (!sizeKey && !colorProvided) return []
+  if (colorProvided && !colorId) return []
+  if (!colorProvided && sizeKey && productHasColoredVariants) return []
 
-  const exact = product.variants.find(v => {
+  return product.variants.filter(v => {
     const vSize = String(v?.options?.size || '')
     const vColorId = String(v?.options?.color || '')
     if (sizeKey && colorId) return vSize === sizeKey && vColorId === colorId
@@ -153,8 +153,47 @@ const findVariantByOptions = async (product, size, color) => {
     if (!sizeKey && colorId) return vColorId === colorId
     return false
   })
+}
 
-  return exact || null
+const resolveVariantForCartItem = async (product, variantInput = {}) => {
+  if (!product?.variants?.length) return null
+  const variantObj = typeof variantInput === 'object' ? variantInput : {}
+  const sku = typeof variantInput === 'string' ? variantInput : (variantObj.sku || null)
+  const size = typeof variantInput === 'object' ? variantObj.size || null : null
+  const color = typeof variantInput === 'object' ? variantObj.color || null : null
+  const id = typeof variantInput === 'object' ? variantObj._id || null : null
+
+  if (id) {
+    const match = product.variants.find(v => String(v._id) === String(id))
+    if (match) return match
+    return null
+  }
+
+  if (sku) {
+    const matches = product.variants.filter(v => v.sku === sku)
+    if (matches.length === 1) return matches[0]
+    if (matches.length > 1 && (size || color)) {
+      const refined = matches.filter(v => {
+        const vSize = String(v?.options?.size || '')
+        const vColorId = String(v?.options?.color || '')
+        const sizeKey = String(size || '')
+        const colorKey = String(color || '')
+        const sizeMatch = sizeKey ? vSize === sizeKey : true
+        const colorMatch = colorKey ? vColorId === colorKey : true
+        return sizeMatch && colorMatch
+      })
+      if (refined.length === 1) return refined[0]
+    }
+    return null
+  }
+
+  if (size || color) {
+    const matches = await findVariantsByOptions(product, size, color)
+    if (matches.length === 1) return matches[0]
+    return null
+  }
+
+  return null
 }
 
 
@@ -218,22 +257,9 @@ exports.createOrder = async (req, res) => {
 
       let variantData = null
       const cartVariant = cartItem.variant || {}
-      const cartVariantSku = typeof cartVariant === 'string'
-        ? cartVariant
-        : (cartVariant.sku || null)
-      const cartVariantSize = typeof cartVariant === 'object' ? cartVariant.size || null : null
-      const cartVariantColor = typeof cartVariant === 'object' ? cartVariant.color || null : null
-      let resolvedVariant = null
-      if (cartVariant && (cartVariant._id || cartVariantSku)) {
-        resolvedVariant = product.variants.find(
-          v => (cartVariant._id && String(v._id) === String(cartVariant._id)) ||
-            (cartVariantSku && v.sku === cartVariantSku)
-        )
-        if (!resolvedVariant) throw new Error('Variant not found')
-      } else if ((cartVariantSize || cartVariantColor) && product.variants?.length) {
-        resolvedVariant = await findVariantByOptions(product, cartVariantSize, cartVariantColor)
-      }
-      if (!resolvedVariant && product.variants?.length && (cartVariantSize || cartVariantColor)) {
+      const resolvedVariant = await resolveVariantForCartItem(product, cartVariant)
+      const hasVariantIntent = !!(cartVariant?._id || cartVariant?.sku || cartVariant?.size || cartVariant?.color || typeof cartVariant === 'string')
+      if (!resolvedVariant && product.variants?.length && hasVariantIntent) {
         throw new Error('Variant not found')
       }
 
@@ -247,13 +273,13 @@ exports.createOrder = async (req, res) => {
         price = variantDiscount > 0
           ? resolvedVariant.price * (1 - variantDiscount / 100)
           : resolvedVariant.price
-        const colorLabel = await resolveColorLabel(resolvedVariant.options?.color || cartVariantColor)
+        const colorLabel = await resolveColorLabel(resolvedVariant.options?.color || cartVariant?.color)
         variantData = {
           _id: resolvedVariant._id,
           sku: resolvedVariant.sku,
           price: resolvedVariant.price,
           discount: variantDiscount,
-          size: resolvedVariant.options?.size || cartVariantSize || null,
+          size: resolvedVariant.options?.size || cartVariant?.size || null,
           color: colorLabel || null
         }
       } else {
@@ -262,10 +288,10 @@ exports.createOrder = async (req, res) => {
           throw new Error('Insufficient product stock')
         }
 
-        if (cartVariantSize || cartVariantColor) {
-          const colorLabel = await resolveColorLabel(cartVariantColor)
+        if (cartVariant?.size || cartVariant?.color) {
+          const colorLabel = await resolveColorLabel(cartVariant?.color)
           variantData = {
-            size: cartVariantSize || null,
+            size: cartVariant?.size || null,
             color: colorLabel || null
           }
         }
@@ -367,22 +393,9 @@ exports.validateOrder = async (req, res) => {
       }
 
       const cartVariant = cartItem.variant || {}
-      const cartVariantSku = typeof cartVariant === 'string'
-        ? cartVariant
-        : (cartVariant.sku || null)
-      const cartVariantSize = typeof cartVariant === 'object' ? cartVariant.size || null : null
-      const cartVariantColor = typeof cartVariant === 'object' ? cartVariant.color || null : null
-      let resolvedVariant = null
-
-      if (cartVariant && (cartVariant._id || cartVariantSku)) {
-        resolvedVariant = product.variants.find(
-          v => (cartVariant._id && String(v._id) === String(cartVariant._id)) ||
-            (cartVariantSku && v.sku === cartVariantSku)
-        )
-      } else if ((cartVariantSize || cartVariantColor) && product.variants?.length) {
-        resolvedVariant = await findVariantByOptions(product, cartVariantSize, cartVariantColor)
-      }
-      if (!resolvedVariant && product.variants?.length && (cartVariantSize || cartVariantColor)) {
+      const resolvedVariant = await resolveVariantForCartItem(product, cartVariant)
+      const hasVariantIntent = !!(cartVariant?._id || cartVariant?.sku || cartVariant?.size || cartVariant?.color || typeof cartVariant === 'string')
+      if (!resolvedVariant && product.variants?.length && hasVariantIntent) {
         errors.push({
           productId: product._id,
           title: product.title,
