@@ -51,18 +51,55 @@ const resolveColorId = async (raw) => {
   return found?._id ? String(found._id) : ''
 }
 
-const findVariantByOptions = async (product, size, color) => {
-  if (!product?.variants?.length) return null
+const findVariantsByOptions = async (product, size, color) => {
+  if (!product?.variants?.length) return []
   const sizeKey = String(size || '').trim()
   const colorKey = await resolveColorId(color)
-  const match = product.variants.find(v => {
+  return product.variants.filter(v => {
     const vSize = String(v?.options?.size || '').trim()
     const vColor = String(v?.options?.color?._id || v?.options?.color || '')
     const sizeMatch = sizeKey ? vSize === sizeKey : true
     const colorMatch = colorKey ? vColor === colorKey : true
     return sizeMatch && colorMatch
   })
-  return match || null
+}
+
+const resolveVariantForInput = async (product, variantInput = {}) => {
+  if (!product?.variants?.length) return null
+  const input = typeof variantInput === 'object' ? variantInput : {}
+  const sku = typeof variantInput === 'string' ? variantInput : (input.sku || null)
+  const id = typeof variantInput === 'object' ? input._id || null : null
+  const size = typeof variantInput === 'object' ? input.size || null : null
+  const color = typeof variantInput === 'object' ? input.color || null : null
+
+  if (id) {
+    const match = product.variants.find(v => String(v._id) === String(id))
+    return match || null
+  }
+
+  if (sku) {
+    const matches = product.variants.filter(v => v.sku === String(sku))
+    if (matches.length === 1) return matches[0]
+    if (matches.length > 1 && (size || color)) {
+      const refined = matches.filter(v => {
+        const vSize = String(v?.options?.size || '').trim()
+        const vColor = String(v?.options?.color?._id || v?.options?.color || '')
+        const sizeKey = String(size || '').trim()
+        const colorKey = String(color || '')
+        const sizeMatch = sizeKey ? vSize === sizeKey : true
+        const colorMatch = colorKey ? vColor === colorKey : true
+        return sizeMatch && colorMatch
+      })
+      if (refined.length === 1) return refined[0]
+    }
+    return null
+  }
+
+  if (size || color) {
+    const matches = await findVariantsByOptions(product, size, color)
+    if (matches.length === 1) return matches[0]
+  }
+  return null
 }
 
 const attachColorMeta = async (cart = []) => {
@@ -131,6 +168,30 @@ exports.getCart = async (req, res) => {
   }
 
   await attachColorMeta(user.cart);
+  // Normalize cart variant payloads to include _id/sku/size/color when possible.
+  let cartUpdated = false
+  for (const item of user.cart) {
+    const product = item?.product
+    if (!product || !product.variants?.length) continue
+    if (!item.variant) continue
+    const resolved = await resolveVariantForInput(product, item.variant)
+    if (resolved?._id) {
+      const nextVariant = {
+        _id: resolved._id,
+        sku: resolved.sku || item.variant?.sku || undefined,
+        size: resolved.options?.size || item.variant?.size || undefined,
+        color: resolved.options?.color?._id || resolved.options?.color || item.variant?.color || undefined
+      }
+      const changed = JSON.stringify(item.variant) !== JSON.stringify(nextVariant)
+      if (changed) {
+        item.variant = nextVariant
+        cartUpdated = true
+      }
+    }
+  }
+  if (cartUpdated) {
+    await user.save()
+  }
   user.cart.forEach(item => {
     const product = item?.product;
     if (!product) return;
@@ -194,15 +255,19 @@ exports.addToCart = async (req, res) => {
     if (!vObj && variantSku) {
       vObj = product.variants.find(v => v.sku === String(variantSku));
     }
-    if (!vObj && (variantSize || variantColor) && product.variants?.length) {
-      vObj = await findVariantByOptions(product, variantSize, variantColor)
+    if (!vObj && (variantId || variantSku || variantSize || variantColor) && product.variants?.length) {
+      vObj = await resolveVariantForInput(product, {
+        ...(variantId ? { _id: variantId } : {}),
+        ...(variantSku ? { sku: variantSku } : {}),
+        ...(variantSize ? { size: variantSize } : {}),
+        ...(variantColor ? { color: variantColor } : {})
+      })
       if (vObj) {
         variantId = vObj._id || variantId
         variantSku = vObj.sku || variantSku
+      } else {
+        return res.status(400).json({ message: 'Variant not found' })
       }
-    }
-    if (!vObj && (variantId || variantSku || variantSize || variantColor) && product.variants?.length) {
-      return res.status(400).json({ message: 'Variant not found' })
     }
     if (vObj) stockLimit = vObj.stock;
 
@@ -311,15 +376,19 @@ exports.updateItem = async (req, res) => {
     if (!vObj && variantSku) {
       vObj = product.variants.find(v => v.sku === String(variantSku));
     }
-    if (!vObj && (variantSize || variantColor) && product.variants?.length) {
-      vObj = await findVariantByOptions(product, variantSize, variantColor)
+    if (!vObj && (variantId || variantSku || variantSize || variantColor) && product.variants?.length) {
+      vObj = await resolveVariantForInput(product, {
+        ...(variantId ? { _id: variantId } : {}),
+        ...(variantSku ? { sku: variantSku } : {}),
+        ...(variantSize ? { size: variantSize } : {}),
+        ...(variantColor ? { color: variantColor } : {})
+      })
       if (vObj) {
         variantId = vObj._id || variantId
         variantSku = vObj.sku || variantSku
+      } else {
+        return res.status(400).json({ message: 'Variant not found' })
       }
-    }
-    if (!vObj && (variantId || variantSku || variantSize || variantColor) && product.variants?.length) {
-      return res.status(400).json({ message: 'Variant not found' })
     }
     if (vObj) stockLimit = vObj.stock;
 
@@ -449,15 +518,19 @@ exports.syncCart = async (req, res) => {
       if (!vObj && variantSku) {
         vObj = product.variants.find(v => v.sku === String(variantSku))
       }
-      if (!vObj && (variantSize || variantColor) && product.variants?.length) {
-        vObj = await findVariantByOptions(product, variantSize, variantColor)
+      if (!vObj && (variantId || variantSku || variantSize || variantColor) && product.variants?.length) {
+        vObj = await resolveVariantForInput(product, {
+          ...(variantId ? { _id: variantId } : {}),
+          ...(variantSku ? { sku: variantSku } : {}),
+          ...(variantSize ? { size: variantSize } : {}),
+          ...(variantColor ? { color: variantColor } : {})
+        })
         if (vObj) {
           variantId = vObj._id || variantId
           variantSku = vObj.sku || variantSku
+        } else {
+          return res.status(400).json({ message: 'Variant not found' })
         }
-      }
-      if (!vObj && (variantId || variantSku || variantSize || variantColor) && product.variants?.length) {
-        return res.status(400).json({ message: 'Variant not found' })
       }
       if (vObj) stockLimit = vObj.stock
 
