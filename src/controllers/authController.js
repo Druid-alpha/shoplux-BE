@@ -22,45 +22,82 @@ const loginSchema = z.object({
     password: z.string().min(6)
 })
 
+const normalizeEmail = (value) => String(value || '').trim().toLowerCase()
+
 
 
 exports.register = async (req, res) => {
     try {
         const data = registerSchema.parse(req.body)
+        const email = normalizeEmail(data.email)
 
-        const existing = await User.findOne({ email: data.email })
+        const existing = await User.findOne({ email })
 
         if (existing) {
             if (!existing.emailVerified) {
-                // User exists but email not verified → tell frontend
+                // Resend OTP for unverified accounts.
+                const otp = Math.floor(100000 + Math.random() * 900000).toString()
+                existing.otp = otp
+                existing.otpExpires = Date.now() + 1000 * 60 * 10
+                existing.otpAttempts = 0
+                existing.otpBlockedUntil = undefined
+
+                if (data.name) existing.name = data.name
+                if (data.password) {
+                    const saltRound = await bcrypt.genSalt(10)
+                    existing.password = await bcrypt.hash(data.password, saltRound)
+                }
+
+                await existing.save()
+
+                await sendEmail({
+                    to: existing.email,
+                    subject: 'Verify your ShopLuxe account',
+                    title: 'Email Verification',
+                    preheader: 'Your verification code is inside.',
+                    htmlContent: `
+                      <h1>Verify your email address</h1>
+                      <p>Hello ${existing.name.split(' ')[0]},</p>
+                      <p>Use the verification code below to complete your signup.</p>
+                      <div class="otp-box">
+                        <p class="otp-code">${otp}</p>
+                      </div>
+                      <div class="card">
+                        <p class="muted">For your security:</p>
+                        <ul class="list">
+                          <li>Never share this code with anyone.</li>
+                          <li>This code expires in 10 minutes.</li>
+                        </ul>
+                      </div>
+                    `
+                })
+
+                existing.lastOtpSentAt = new Date()
+                await existing.save()
+
                 return res
-                    .status(400)
-                    .json({ success: false, message: 'email not verified' })
+                    .status(200)
+                    .json({ success: true, message: 'Email not verified. New OTP sent.' })
             }
-            // User exists and verified → normal error
             return res
                 .status(400)
                 .json({ success: false, message: 'email already exists' })
         }
 
-        // Hash password
         const saltRound = await bcrypt.genSalt(10)
         const hashed = await bcrypt.hash(data.password, saltRound)
 
-        // Create new user
         const user = await User.create({
             name: data.name,
-            email: data.email,
+            email,
             password: hashed,
         })
 
-        // Generate OTP
         const otp = Math.floor(100000 + Math.random() * 900000).toString()
         user.otp = otp
-        user.otpExpires = Date.now() + 1000 * 60 * 10 // 10 minutes
+        user.otpExpires = Date.now() + 1000 * 60 * 10
         await user.save()
 
-        // Send OTP email
         await sendEmail({
             to: user.email,
             subject: 'Verify your ShopLuxe account',
@@ -81,9 +118,12 @@ exports.register = async (req, res) => {
                 </ul>
               </div>
               <div class="divider"></div>
-              <p class="muted">If you didn’t create a ShopLuxe account, you can safely ignore this email.</p>
+              <p class="muted">If you didn�t create a ShopLuxe account, you can safely ignore this email.</p>
             `,
         })
+
+        user.lastOtpSentAt = new Date()
+        await user.save()
 
         res
             .status(201)
@@ -108,7 +148,7 @@ exports.register = async (req, res) => {
 
 exports.resendOtp = async (req, res) => {
     try {
-        const { email } = req.body
+        const email = normalizeEmail(req.body?.email)
         const user = await User.findOne({ email })
 
         if (!user) return res.status(404).json({ message: 'User not found' })
@@ -116,7 +156,6 @@ exports.resendOtp = async (req, res) => {
             return res.status(400).json({ message: 'Email already verified' })
         }
 
-        // ⏱ Rate limit (60 seconds)
         if (
             user.lastOtpSentAt &&
             Date.now() - user.lastOtpSentAt.getTime() < 60 * 1000
@@ -130,7 +169,6 @@ exports.resendOtp = async (req, res) => {
 
         user.otp = otp
         user.otpExpires = Date.now() + 1000 * 60 * 10
-        user.lastOtpSentAt = new Date()
         user.otpAttempts = 0
 
         await user.save()
@@ -157,21 +195,23 @@ exports.resendOtp = async (req, res) => {
             `
         })
 
+        user.lastOtpSentAt = new Date()
+        await user.save()
+
         res.json({ message: 'OTP resent successfully' })
     } catch (error) {
         res.status(500).json({ message: 'Failed to resend OTP' })
     }
 }
 
-
 exports.verifyOtp = async (req, res) => {
     try {
-        const { email, otp } = req.body
+        const email = normalizeEmail(req.body?.email)
+        const otp = String(req.body?.otp || '').trim()
         const user = await User.findOne({ email })
 
         if (!user) return res.status(404).json({ message: 'User not found' })
 
-        // 🚫 Blocked due to too many attempts
         if (user.otpBlockedUntil && user.otpBlockedUntil > Date.now()) {
             return res.status(429).json({
                 message: 'Too many attempts. Try again later.'
@@ -181,9 +221,8 @@ exports.verifyOtp = async (req, res) => {
         if (!user.otp || user.otp !== otp) {
             user.otpAttempts += 1
 
-            // ⛔ Block after 5 failed attempts
             if (user.otpAttempts >= 5) {
-                user.otpBlockedUntil = Date.now() + 1000 * 60 * 15 // 15 mins
+                user.otpBlockedUntil = Date.now() + 1000 * 60 * 15
             }
 
             await user.save()
@@ -194,7 +233,6 @@ exports.verifyOtp = async (req, res) => {
             return res.status(400).json({ message: 'OTP expired' })
         }
 
-        // ✅ Success
         user.emailVerified = true
         user.otp = undefined
         user.otpExpires = undefined
@@ -202,17 +240,16 @@ exports.verifyOtp = async (req, res) => {
         user.otpBlockedUntil = undefined
 
         await user.save()
-        // 🎉 SEND WELCOME EMAIL
         await sendEmail({
             to: user.email,
-            subject: 'Welcome to ShopLuxe 🎉',
+            subject: 'Welcome to ShopLuxe',
             title: 'Welcome to ShopLuxe',
             preheader: 'Your account is fully verified.',
             htmlContent: `
                 <h1>Welcome, ${user.name.split(' ')[0]}!</h1>
                 <p>Your email is verified and your account is ready.</p>
                 <div class="card">
-                  <p><strong>What’s next?</strong></p>
+                  <p><strong>What's next?</strong></p>
                   <ul class="list">
                     <li>Explore curated collections.</li>
                     <li>Save items to your wishlist.</li>
@@ -231,17 +268,17 @@ exports.verifyOtp = async (req, res) => {
     }
 }
 
-
 exports.login = async (req, res) => {
     try {
         const data = loginSchema.parse(req.body)
-        const user = await User.findOne({ email: data.email })
+        const email = normalizeEmail(data.email)
+        const user = await User.findOne({ email })
         if (!user) return res.status(400).json({ message: 'invalid credentials' })
         if (user.isDeleted) return res.status(400).json({ message: 'user is removed' })
 
         const ok = await bcrypt.compare(data.password, user.password)
         if (!ok) return res.status(400).json({ message: 'invalid credentials' })
-        if (!user.emailVerified) return res.status(403).json({ message: ' verify email first' })
+        if (!user.emailVerified) return res.status(403).json({ message: 'email not verified' })
 
         const accessToken = signAccessToken({ id: user._id, role: user.role })
         const refreshToken = signRefreshToken({ id: user._id })
@@ -264,22 +301,15 @@ exports.login = async (req, res) => {
                 avatar: user.avatar
             }
         })
-
     } catch (error) {
-
         const zodErrors = handleZodError(error)
-
         if (zodErrors) {
             return res.status(400).json({
                 success: false,
                 errors: zodErrors
             })
         }
-
-        res.status(500).json({
-            success: false,
-            message: 'Server error'
-        })
+        res.status(500).json({ message: 'Server error' })
     }
 }
 
@@ -384,57 +414,46 @@ exports.me = async (req, res) => {
 }
 exports.forgotPassword = async (req, res) => {
     try {
-        const { email } = req.body
+        const email = normalizeEmail(req.body?.email)
         if (!email || email.trim() === '') {
             return res.status(400).json({ message: 'Email field is required' })
         }
 
         const user = await User.findOne({ email })
 
-        // Do NOT reveal if user exists (security best practice)
         if (!user) {
             return res.json({ message: 'If email exists, reset link sent' })
         }
 
-        const rawToken = crypto.randomBytes(32).toString('hex')
-
-        user.resetToken = crypto
-            .createHash('sha256')
-            .update(rawToken)
-            .digest('hex')
-
-        user.resetTokenExpires = Date.now() + 1000 * 60 * 30 // 30 mins
+        const resetToken = crypto.randomBytes(32).toString('hex')
+        user.resetToken = resetToken
+        user.resetTokenExpires = Date.now() + 1000 * 60 * 30
         await user.save()
 
-        const resetLink = `${process.env.CLIENT_URL}/reset-password/${rawToken}`
+        const resetLink = `${process.env.CLIENT_URL}/reset-password/${resetToken}`
 
         await sendEmail({
             to: user.email,
-            subject: 'Reset your password - ShopLuxe',
+            subject: 'Reset your ShopLuxe password',
             title: 'Password Reset',
-            preheader: 'Link to reset your password is inside.',
+            preheader: 'A password reset was requested for your account.',
             htmlContent: `
-              <h1>Reset Your Password</h1>
+              <h1>Password reset request</h1>
               <p>Hello ${user.name.split(' ')[0]},</p>
-              <p>We received a request to reset the password for your ShopLuxe account.</p>
-              <div style="text-align: center; margin: 24px 0;">
-                <a href="${resetLink}" class="button">Reset Password</a>
+              <p>We received a request to reset your password. Click the button below to continue.</p>
+              <div style="text-align:center; margin:20px 0;">
+                <a class="button" href="${resetLink}">Reset Password</a>
               </div>
-              <div class="card">
-                <p class="muted">If the button doesn’t work, copy and paste this link:</p>
-                <p style="word-break: break-all; color: #2563eb; font-size: 14px;">${resetLink}</p>
-              </div>
-              <p class="muted" style="margin-top: 20px;">This link expires in 30 minutes. If you didn’t request a reset, you can ignore this email.</p>
-            `
+              <p class="muted" style="margin-top: 20px;">This link expires in 30 minutes. If you didn�t request a reset, you can ignore this email.</p>
+            `,
+            text: `Reset your ShopLuxe password: ${resetLink}`
         })
 
         res.json({ message: 'Password reset email sent' })
     } catch (error) {
-        console.error(error)
         res.status(500).json({ message: 'Error sending reset email' })
     }
 }
-
 
 exports.resetpassword = async (req, res) => {
     try {
@@ -469,6 +488,9 @@ exports.resetpassword = async (req, res) => {
         res.status(500).json({ message: 'Reset failed' })
     }
 }
+
+
+
 
 
 

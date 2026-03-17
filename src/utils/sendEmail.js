@@ -47,18 +47,24 @@ const emailTemplate = (title, content, preheader = '') => `
 
 const sendEmail = async ({ to, subject, text, htmlContent, title, preheader }) => {
     try {
+        const smtpUser = process.env.SMTP_USER
+        const smtpPass = (process.env.SMTP_PASS || '').replace(/\s+/g, '')
+        if (!smtpUser || !smtpPass) {
+            throw new Error('SMTP credentials are missing')
+        }
+
         const transporter = nodeMailer.createTransport({
             service: 'gmail',
             auth: {
-                user: process.env.SMTP_USER,
-                pass: process.env.SMTP_PASS
+                user: smtpUser,
+                pass: smtpPass
             }
         })
 
         const finalHtml = htmlContent ? emailTemplate(title || subject, htmlContent, preheader) : undefined
 
         await transporter.sendMail({
-            from: `"${process.env.APP_NAME || 'ShopLuxe.'}" <${process.env.SMTP_USER}>`,
+            from: `"${process.env.APP_NAME || 'ShopLuxe.'}" <${smtpUser}>`,
             to,
             subject,
             text,
