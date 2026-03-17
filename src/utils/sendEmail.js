@@ -8,17 +8,22 @@ const emailTemplate = (title, content, preheader = '') => `
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${title}</title>
   <style>
-    body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #f6f9fc; margin: 0; padding: 0; -webkit-font-smoothing: antialiased; }
-    .container { max-width: 600px; margin: 40px auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
-    .header { background-color: #000000; padding: 32px 40px; text-align: center; }
+    body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #f5f6f8; margin: 0; padding: 0; -webkit-font-smoothing: antialiased; }
+    .container { max-width: 600px; margin: 40px auto; background: #ffffff; border-radius: 14px; overflow: hidden; box-shadow: 0 8px 24px rgba(0,0,0,0.08); }
+    .header { background: linear-gradient(135deg, #0b0b0b, #1a1a1a); padding: 28px 40px; text-align: center; }
     .logo { color: #ffffff; font-size: 28px; font-weight: 900; letter-spacing: -1px; text-decoration: none; font-style: italic; }
-    .logo span { color: #888888; }
-    .content { padding: 40px; color: #333333; line-height: 1.6; font-size: 16px; }
-    .footer { padding: 30px 40px; text-align: center; background-color: #f8fafc; color: #888888; font-size: 13px; border-top: 1px solid #eeeeee; }
-    .button { display: inline-block; background-color: #000000; color: #ffffff !important; padding: 14px 28px; border-radius: 8px; text-decoration: none; font-weight: bold; margin: 20px 0; }
-    .otp-box { background: #f8fafc; border: 1px solid #e2e8f0; padding: 20px; text-align: center; border-radius: 8px; margin: 24px 0; }
-    .otp-code { font-size: 32px; font-weight: 800; letter-spacing: 8px; color: #000000; margin: 0; }
-    h1 { margin-top: 0; font-size: 24px; font-weight: 700; color: #111111; }
+    .logo span { color: #9ca3af; }
+    .content { padding: 40px; color: #1f2937; line-height: 1.65; font-size: 16px; }
+    .footer { padding: 28px 36px; text-align: center; background-color: #f8fafc; color: #6b7280; font-size: 12px; border-top: 1px solid #eef2f7; }
+    .button { display: inline-block; background-color: #111827; color: #ffffff !important; padding: 12px 24px; border-radius: 10px; text-decoration: none; font-weight: 700; margin: 18px 0; }
+    .otp-box { background: #f8fafc; border: 1px solid #e2e8f0; padding: 18px; text-align: center; border-radius: 10px; margin: 20px 0; }
+    .otp-code { font-size: 30px; font-weight: 800; letter-spacing: 6px; color: #0f172a; margin: 0; }
+    h1 { margin-top: 0; font-size: 24px; font-weight: 800; color: #111827; }
+    .meta { font-size: 13px; color: #6b7280; }
+    .muted { color: #6b7280; font-size: 14px; }
+    .card { border: 1px solid #eef2f7; border-radius: 12px; padding: 16px; background: #fbfdff; }
+    .divider { border-top: 1px solid #eef2f7; margin: 24px 0; }
+    .list { padding-left: 18px; margin: 10px 0; }
     .preheader { display: none !important; visibility: hidden; opacity: 0; color: transparent; height: 0; width: 0; }
   </style>
 </head>

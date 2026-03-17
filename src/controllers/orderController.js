@@ -34,10 +34,14 @@ const canRequestReturn = (order) => {
 const statusEmailContent = (order, status) => {
   const statusLabel = String(status || '').toUpperCase()
   return `
-    <h1>Your order is now ${statusLabel}</h1>
-    <p>Order ID: <strong>${order._id}</strong></p>
-    <p>We will keep you updated as your order progresses.</p>
-    <p><a class="button" href="${process.env.CLIENT_URL}/orders/${order._id}">View Order</a></p>
+    <h1>Order update: ${statusLabel}</h1>
+    <div class="card">
+      <p><strong>Order ID:</strong> ${order._id}</p>
+      <p class="meta">We’ll keep you updated as your order progresses.</p>
+    </div>
+    <div style="text-align:center; margin:20px 0;">
+      <a class="button" href="${process.env.CLIENT_URL}/orders/${order._id}">View Order</a>
+    </div>
   `
 }
 
@@ -599,9 +603,13 @@ exports.addReturnMessage = async (req, res) => {
           text: `Message from support on your return request. Order ID: ${order._id}. ${order.returnNote}`,
           htmlContent: `
             <h1>Message from support</h1>
-            <p>Order ID: <strong>${order._id}</strong></p>
-            <p>${order.returnNote}</p>
-            <p><a class="button" href="${process.env.CLIENT_URL}/orders/${order._id}">View Order</a></p>
+            <div class="card">
+              <p><strong>Order ID:</strong> ${order._id}</p>
+              <p>${order.returnNote}</p>
+            </div>
+            <div style="text-align:center; margin:20px 0;">
+              <a class="button" href="${process.env.CLIENT_URL}/orders/${order._id}">View Order</a>
+            </div>
           `,
           preheader: 'New message about your return'
         })
@@ -667,8 +675,10 @@ exports.addReturnMessageUser = async (req, res) => {
           text: `Order ID: ${order._id}. Message: ${trimmed}`,
           htmlContent: `
             <h1>New return message</h1>
-            <p>Order ID: <strong>${order._id}</strong></p>
-            <p>${trimmed}</p>
+            <div class="card">
+              <p><strong>Order ID:</strong> ${order._id}</p>
+              <p>${trimmed}</p>
+            </div>
           `,
           preheader: 'A customer sent a return message'
         })
@@ -860,10 +870,14 @@ exports.updateReturnStatus = async (req, res) => {
           }`,
           htmlContent: `
             <h1>Your return request was ${status}</h1>
-            <p>Order ID: <strong>${order._id}</strong></p>
-            ${reasonLine}
-            ${noteLine}
-            <p><a class="button" href="${process.env.CLIENT_URL}/orders/${order._id}">View Order</a></p>
+            <div class="card">
+              <p><strong>Order ID:</strong> ${order._id}</p>
+              ${reasonLine}
+              ${noteLine}
+            </div>
+            <div style="text-align:center; margin:20px 0;">
+              <a class="button" href="${process.env.CLIENT_URL}/orders/${order._id}">View Order</a>
+            </div>
           `,
           preheader: `Return ${status}`
         })

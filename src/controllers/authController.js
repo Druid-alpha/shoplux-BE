@@ -69,11 +69,19 @@ exports.register = async (req, res) => {
             htmlContent: `
               <h1>Verify your email address</h1>
               <p>Hello ${user.name.split(' ')[0]},</p>
-              <p>Welcome to ShopLuxe! We're thrilled to have you. To complete your registration, please enter the verification code below:</p>
+              <p>Thanks for joining ShopLuxe. Use the verification code below to complete your signup.</p>
               <div class="otp-box">
                 <p class="otp-code">${otp}</p>
               </div>
-              <p>This code will expire in 10 minutes. If you didn't create an account, you can safely ignore this email.</p>
+              <div class="card">
+                <p class="muted">For your security:</p>
+                <ul class="list">
+                  <li>Never share this code with anyone.</li>
+                  <li>This code expires in 10 minutes.</li>
+                </ul>
+              </div>
+              <div class="divider"></div>
+              <p class="muted">If you didn’t create a ShopLuxe account, you can safely ignore this email.</p>
             `,
         })
 
@@ -133,13 +141,19 @@ exports.resendOtp = async (req, res) => {
             title: 'New OTP Code',
             preheader: 'Here is your new verification code.',
             htmlContent: `
-              <h1>New Verification Code</h1>
+              <h1>Your new verification code</h1>
               <p>Hello ${user.name.split(' ')[0]},</p>
-              <p>You requested a new verification code. Please use the code below to verify your email address:</p>
+              <p>Use the code below to verify your email address.</p>
               <div class="otp-box">
                 <p class="otp-code">${otp}</p>
               </div>
-              <p>This code will expire in 10 minutes.</p>
+              <div class="card">
+                <p class="muted">For your security:</p>
+                <ul class="list">
+                  <li>Do not share this code with anyone.</li>
+                  <li>This code expires in 10 minutes.</li>
+                </ul>
+              </div>
             `
         })
 
@@ -195,13 +209,20 @@ exports.verifyOtp = async (req, res) => {
             title: 'Welcome to ShopLuxe',
             preheader: 'Your account is fully verified.',
             htmlContent: `
-                <h1>Welcome, ${user.name.split(' ')[0]}! 👋</h1>
-                <p>Your email has been successfully verified, and your ShopLuxe account is now fully active.</p>
-                <p>We curate the finest premium products for an unmatched shopping experience. You can now log in and start browsing our collections.</p>
-                <div style="text-align: center; margin: 30px 0;">
+                <h1>Welcome, ${user.name.split(' ')[0]}!</h1>
+                <p>Your email is verified and your account is ready.</p>
+                <div class="card">
+                  <p><strong>What’s next?</strong></p>
+                  <ul class="list">
+                    <li>Explore curated collections.</li>
+                    <li>Save items to your wishlist.</li>
+                    <li>Track orders in real time.</li>
+                  </ul>
+                </div>
+                <div style="text-align: center; margin: 24px 0;">
                   <a href="${process.env.CLIENT_URL || 'http://localhost:5173'}/products" class="button">Start Shopping</a>
                 </div>
-                <p>If you have any questions or need assistance, our support team is always here to help.</p>
+                <p class="muted">Need help? Reply to this email and our support team will assist.</p>
             `
         })
         res.json({ message: 'Email verified successfully' })
@@ -396,12 +417,14 @@ exports.forgotPassword = async (req, res) => {
               <h1>Reset Your Password</h1>
               <p>Hello ${user.name.split(' ')[0]},</p>
               <p>We received a request to reset the password for your ShopLuxe account.</p>
-              <div style="text-align: center; margin: 30px 0;">
+              <div style="text-align: center; margin: 24px 0;">
                 <a href="${resetLink}" class="button">Reset Password</a>
               </div>
-              <p>If the button doesn't work, copy and paste this link into your browser:</p>
-              <p style="word-break: break-all; color: #0066cc; font-size: 14px;">${resetLink}</p>
-              <p style="margin-top: 30px; font-size: 14px; color: #666;">This link will expire in 30 minutes. If you did not request a password reset, you can safely ignore this email.</p>
+              <div class="card">
+                <p class="muted">If the button doesn’t work, copy and paste this link:</p>
+                <p style="word-break: break-all; color: #2563eb; font-size: 14px;">${resetLink}</p>
+              </div>
+              <p class="muted" style="margin-top: 20px;">This link expires in 30 minutes. If you didn’t request a reset, you can ignore this email.</p>
             `
         })
 

@@ -288,11 +288,19 @@ const buildQueryFromReq = async (req, { admin = false } = {}) => {
   // Search
   if (req.query.search) {
     const regex = new RegExp(req.query.search, 'i')
+    const [matchedCategories, matchedBrands] = await Promise.all([
+      Category.find({ name: regex }).select('_id'),
+      Brand.find({ name: regex }).select('_id')
+    ])
+    const categoryIds = matchedCategories.map(c => c._id)
+    const brandIds = matchedBrands.map(b => b._id)
     andConditions.push({
       $or: [
         { title: regex },
         { description: regex },
-        { sku: regex }
+        { sku: regex },
+        ...(categoryIds.length ? [{ category: { $in: categoryIds } }] : []),
+        ...(brandIds.length ? [{ brand: { $in: brandIds } }] : [])
       ]
     })
   }
@@ -707,6 +715,57 @@ exports.listProducts = async (req, res) => {
   } catch (err) {
     console.error(err)
     res.status(500).json({ message: 'Failed to list products' })
+  }
+}
+
+/* =====================================================
+   BULK PRODUCTS BY IDS (PUBLIC)
+===================================================== */
+exports.getProductsByIds = async (req, res) => {
+  try {
+    const raw = req.query.ids || req.body?.ids || ''
+    const ids = Array.isArray(raw)
+      ? raw
+      : String(raw || '')
+        .split(',')
+        .map(v => v.trim())
+        .filter(isValidObjectId)
+
+    if (!ids.length) return res.json({ products: [] })
+
+    const products = await Product.find({ _id: { $in: ids }, isDeleted: false })
+      .populate('brand category variants.options.color color')
+      .lean()
+
+    const productMap = new Map(products.map(p => [String(p._id), p]))
+    const ordered = ids.map(id => productMap.get(String(id))).filter(Boolean)
+
+    const withStock = ordered.map(prod => {
+      const variantStock = prod.variants?.length
+        ? prod.variants.reduce((sum, v) => sum + (v.stock || 0), 0)
+        : 0
+      const variantReserved = prod.variants?.length
+        ? prod.variants.reduce((sum, v) => sum + (v.reserved || 0), 0)
+        : 0
+      const availableVariantStock = prod.variants?.length
+        ? prod.variants.reduce((sum, v) => sum + Math.max(0, (v.stock || 0) - (v.reserved || 0)), 0)
+        : 0
+      const totalStock = (prod.stock || 0) + variantStock
+      const totalReserved = (prod.reserved || 0) + variantReserved
+      const availableStock = Math.max(0, (prod.stock || 0) - (prod.reserved || 0)) + availableVariantStock
+      return {
+        ...prod,
+        totalStock,
+        totalReserved,
+        availableStock,
+        isOutOfStock: availableStock <= 0
+      }
+    })
+
+    res.json({ products: withStock })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ message: 'Failed to fetch products by ids' })
   }
 }
 /* =====================================================

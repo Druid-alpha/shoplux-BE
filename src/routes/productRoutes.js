@@ -93,6 +93,9 @@ router.get('/filters', ProductController.getFilterOptions)
 // Featured products
 router.get('/featured', ProductController.getFeatured)
 
+// Bulk fetch by ids (guest wishlist support)
+router.get('/by-ids', ProductController.getProductsByIds)
+
 // List products
 router.get('/', ProductController.listProducts)
 

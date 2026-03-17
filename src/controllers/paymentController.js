@@ -80,9 +80,15 @@ exports.refundPaystackPayment = async (req, res) => {
           }`,
           htmlContent: `
             <h1>Your refund is complete</h1>
-            <p>Order ID: <strong>${order._id}</strong></p>
-            <p>Amount: ₦${(order.refundAmount || 0).toLocaleString()}</p>
-            <p>If you have any questions, reply to this email.</p>
+            <div class="card">
+              <p><strong>Order ID:</strong> ${order._id}</p>
+              <p><strong>Amount:</strong> ₦${(order.refundAmount || 0).toLocaleString()}</p>
+              ${order.returnNote ? `<p><strong>Note:</strong> ${order.returnNote}</p>` : ''}
+            </div>
+            <div style="text-align:center; margin:20px 0;">
+              <a class="button" href="${process.env.CLIENT_URL}/orders/${order._id}">View Order</a>
+            </div>
+            <p class="muted">If you have any questions, reply to this email.</p>
           `,
           preheader: 'Your refund has been processed'
         })
@@ -569,8 +575,22 @@ exports.paystackWebHook = async (req, res) => {
     try {
       await sendEmail({
         to: order.user.email,
-        subject: 'Payment Successful - ShopLuxe',
-        text: `Your payment for order #${order._id} was successful. Thank you for shopping with ShopLuxe!\n\nShipping to: ${order.shippingAddress?.fullName || 'N/A'}, ${order.shippingAddress?.address || ''}, ${order.shippingAddress?.city || ''}, ${order.shippingAddress?.state || ''}.`
+        subject: 'Payment successful - ShopLuxe',
+        title: 'Payment successful',
+        preheader: 'We’ve received your payment and are preparing your order.',
+        text: `Your payment for order #${order._id} was successful. Thank you for shopping with ShopLuxe!\n\nShipping to: ${order.shippingAddress?.fullName || 'N/A'}, ${order.shippingAddress?.address || ''}, ${order.shippingAddress?.city || ''}, ${order.shippingAddress?.state || ''}.`,
+        htmlContent: `
+          <h1>Payment received</h1>
+          <div class="card">
+            <p><strong>Order ID:</strong> ${order._id}</p>
+            <p><strong>Total:</strong> ₦${(order.totalAmount || 0).toLocaleString()}</p>
+            <p><strong>Shipping:</strong> ${order.shippingAddress?.fullName || 'N/A'}, ${order.shippingAddress?.address || ''}, ${order.shippingAddress?.city || ''}, ${order.shippingAddress?.state || ''}</p>
+          </div>
+          <div style="text-align:center; margin:20px 0;">
+            <a class="button" href="${process.env.CLIENT_URL}/orders/${order._id}">Track Order</a>
+          </div>
+          <p class="muted">We’ll notify you when your order ships.</p>
+        `
       })
     } catch (e) { console.error('Email failed:', e.message) }
 
