@@ -10,10 +10,22 @@ const authLimiter = rateLimit({
   message: { message: 'Too many attempts. Please try again later.' }
 })
 
-const otpLimiter = rateLimit({
+const otpVerifyLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 8,
+  message: { message: 'Too many OTP attempts. Please wait and try again.' }
+})
+
+const otpResendLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 3,
+  message: { message: 'Too many OTP resend requests. Please wait and try again.' }
+})
+
+const otpResetLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
   max: 5,
-  message: { message: 'Too many OTP requests. Please wait and try again.' }
+  message: { message: 'Too many reset requests. Please wait and try again.' }
 })
 
 router.post(
@@ -26,9 +38,9 @@ router.post('/login', authLimiter, authCtrl.login)
 router.post('/refresh', authCtrl.refresh)
 router.post('/logout', authCtrl.logOut)
 router.get('/me', authCtrl.me)
-router.post('/verify-otp', otpLimiter, authCtrl.verifyOtp)
-router.post('/forgot-password', otpLimiter, authCtrl.forgotPassword)
-router.post('/reset-password/:token', otpLimiter, authCtrl.resetpassword)
-router.post('/resend-otp', otpLimiter, authCtrl.resendOtp)
+router.post('/verify-otp', otpVerifyLimiter, authCtrl.verifyOtp)
+router.post('/forgot-password', otpResetLimiter, authCtrl.forgotPassword)
+router.post('/reset-password/:token', otpResetLimiter, authCtrl.resetpassword)
+router.post('/resend-otp', otpResendLimiter, authCtrl.resendOtp)
 
 module.exports = router

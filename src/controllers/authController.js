@@ -168,8 +168,11 @@ exports.resendOtp = async (req, res) => {
             user.lastOtpSentAt &&
             Date.now() - user.lastOtpSentAt.getTime() < 60 * 1000
         ) {
+            const elapsed = Date.now() - user.lastOtpSentAt.getTime()
+            const retryAfterSeconds = Math.max(1, Math.ceil((60 * 1000 - elapsed) / 1000))
             return res.status(429).json({
-                message: 'Please wait before requesting another OTP'
+                message: 'Please wait before requesting another OTP',
+                retryAfterSeconds
             })
         }
 
