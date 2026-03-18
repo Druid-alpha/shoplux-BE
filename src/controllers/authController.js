@@ -1,4 +1,4 @@
-const User = require('../../models/user')
+﻿const User = require('../../models/user')
 const { z } = require('zod')
 const bcrypt = require('bcryptjs')
 const sendEmail = require('../utils/sendEmail')
@@ -23,7 +23,8 @@ const loginSchema = z.object({
 })
 
 const normalizeEmail = (value) => String(value || '').trim().toLowerCase()
-
+const safeErrorMessage = (error) =>
+    (process.env.NODE_ENV === 'production' ? 'Server error' : (error?.message || 'Server error'))
 
 
 exports.register = async (req, res) => {
@@ -35,7 +36,6 @@ exports.register = async (req, res) => {
 
         if (existing) {
             if (!existing.emailVerified) {
-                // Resend OTP for unverified accounts.
                 const otp = Math.floor(100000 + Math.random() * 900000).toString()
                 existing.otp = otp
                 existing.otpExpires = Date.now() + 1000 * 60 * 10
@@ -50,27 +50,31 @@ exports.register = async (req, res) => {
 
                 await existing.save()
 
-                await sendEmail({
-                    to: existing.email,
-                    subject: 'Verify your ShopLuxe account',
-                    title: 'Email Verification',
-                    preheader: 'Your verification code is inside.',
-                    htmlContent: `
-                      <h1>Verify your email address</h1>
-                      <p>Hello ${existing.name.split(' ')[0]},</p>
-                      <p>Use the verification code below to complete your signup.</p>
-                      <div class="otp-box">
-                        <p class="otp-code">${otp}</p>
-                      </div>
-                      <div class="card">
-                        <p class="muted">For your security:</p>
-                        <ul class="list">
-                          <li>Never share this code with anyone.</li>
-                          <li>This code expires in 10 minutes.</li>
-                        </ul>
-                      </div>
-                    `
-                })
+                try {
+                    await sendEmail({
+                        to: existing.email,
+                        subject: 'Verify your ShopLuxe account',
+                        title: 'Email Verification',
+                        preheader: 'Your verification code is inside.',
+                        htmlContent: `
+                          <h1>Verify your email address</h1>
+                          <p>Hello ${existing.name.split(' ')[0]},</p>
+                          <p>Use the verification code below to complete your signup.</p>
+                          <div class="otp-box">
+                            <p class="otp-code">${otp}</p>
+                          </div>
+                          <div class="card">
+                            <p class="muted">For your security:</p>
+                            <ul class="list">
+                              <li>Never share this code with anyone.</li>
+                              <li>This code expires in 10 minutes.</li>
+                            </ul>
+                          </div>
+                        `
+                    })
+                } catch (emailErr) {
+                    return res.status(500).json({ success: false, message: safeErrorMessage(emailErr) })
+                }
 
                 existing.lastOtpSentAt = new Date()
                 await existing.save()
@@ -98,29 +102,34 @@ exports.register = async (req, res) => {
         user.otpExpires = Date.now() + 1000 * 60 * 10
         await user.save()
 
-        await sendEmail({
-            to: user.email,
-            subject: 'Verify your ShopLuxe account',
-            title: 'Email Verification',
-            preheader: 'Your verification code is inside.',
-            htmlContent: `
-              <h1>Verify your email address</h1>
-              <p>Hello ${user.name.split(' ')[0]},</p>
-              <p>Thanks for joining ShopLuxe. Use the verification code below to complete your signup.</p>
-              <div class="otp-box">
-                <p class="otp-code">${otp}</p>
-              </div>
-              <div class="card">
-                <p class="muted">For your security:</p>
-                <ul class="list">
-                  <li>Never share this code with anyone.</li>
-                  <li>This code expires in 10 minutes.</li>
-                </ul>
-              </div>
-              <div class="divider"></div>
-              <p class="muted">If you didn�t create a ShopLuxe account, you can safely ignore this email.</p>
-            `,
-        })
+        try {
+            await sendEmail({
+                to: user.email,
+                subject: 'Verify your ShopLuxe account',
+                title: 'Email Verification',
+                preheader: 'Your verification code is inside.',
+                htmlContent: `
+                  <h1>Verify your email address</h1>
+                  <p>Hello ${user.name.split(' ')[0]},</p>
+                  <p>Thanks for joining ShopLuxe. Use the verification code below to complete your signup.</p>
+                  <div class="otp-box">
+                    <p class="otp-code">${otp}</p>
+                  </div>
+                  <div class="card">
+                    <p class="muted">For your security:</p>
+                    <ul class="list">
+                      <li>Never share this code with anyone.</li>
+                      <li>This code expires in 10 minutes.</li>
+                    </ul>
+                  </div>
+                  <div class="divider"></div>
+                  <p class="muted">If you didn’t create a ShopLuxe account, you can safely ignore this email.</p>
+                `,
+            })
+        } catch (emailErr) {
+            await User.deleteOne({ _id: user._id })
+            return res.status(500).json({ success: false, message: safeErrorMessage(emailErr) })
+        }
 
         user.lastOtpSentAt = new Date()
         await user.save()
@@ -129,7 +138,6 @@ exports.register = async (req, res) => {
             .status(201)
             .json({ success: true, message: 'Registered, check email for OTP' })
     } catch (error) {
-
         const zodErrors = handleZodError(error)
 
         if (zodErrors) {
@@ -141,7 +149,7 @@ exports.register = async (req, res) => {
 
         res.status(500).json({
             success: false,
-            message: 'Server error'
+            message: safeErrorMessage(error)
         })
     }
 }
@@ -173,34 +181,38 @@ exports.resendOtp = async (req, res) => {
 
         await user.save()
 
-        await sendEmail({
-            to: user.email,
-            subject: 'Your new verification code',
-            title: 'New OTP Code',
-            preheader: 'Here is your new verification code.',
-            htmlContent: `
-              <h1>Your new verification code</h1>
-              <p>Hello ${user.name.split(' ')[0]},</p>
-              <p>Use the code below to verify your email address.</p>
-              <div class="otp-box">
-                <p class="otp-code">${otp}</p>
-              </div>
-              <div class="card">
-                <p class="muted">For your security:</p>
-                <ul class="list">
-                  <li>Do not share this code with anyone.</li>
-                  <li>This code expires in 10 minutes.</li>
-                </ul>
-              </div>
-            `
-        })
+        try {
+            await sendEmail({
+                to: user.email,
+                subject: 'Your new verification code',
+                title: 'New OTP Code',
+                preheader: 'Here is your new verification code.',
+                htmlContent: `
+                  <h1>Your new verification code</h1>
+                  <p>Hello ${user.name.split(' ')[0]},</p>
+                  <p>Use the code below to verify your email address.</p>
+                  <div class="otp-box">
+                    <p class="otp-code">${otp}</p>
+                  </div>
+                  <div class="card">
+                    <p class="muted">For your security:</p>
+                    <ul class="list">
+                      <li>Do not share this code with anyone.</li>
+                      <li>This code expires in 10 minutes.</li>
+                    </ul>
+                  </div>
+                `
+            })
+        } catch (emailErr) {
+            return res.status(500).json({ message: safeErrorMessage(emailErr) })
+        }
 
         user.lastOtpSentAt = new Date()
         await user.save()
 
         res.json({ message: 'OTP resent successfully' })
     } catch (error) {
-        res.status(500).json({ message: 'Failed to resend OTP' })
+        res.status(500).json({ message: safeErrorMessage(error) })
     }
 }
 
@@ -309,7 +321,7 @@ exports.login = async (req, res) => {
                 errors: zodErrors
             })
         }
-        res.status(500).json({ message: 'Server error' })
+        res.status(500).json({ message: safeErrorMessage(error) })
     }
 }
 
@@ -444,7 +456,7 @@ exports.forgotPassword = async (req, res) => {
               <div style="text-align:center; margin:20px 0;">
                 <a class="button" href="${resetLink}">Reset Password</a>
               </div>
-              <p class="muted" style="margin-top: 20px;">This link expires in 30 minutes. If you didn�t request a reset, you can ignore this email.</p>
+              <p class="muted" style="margin-top: 20px;">This link expires in 30 minutes. If you didn’t request a reset, you can ignore this email.</p>
             `,
             text: `Reset your ShopLuxe password: ${resetLink}`
         })
@@ -476,7 +488,7 @@ exports.resetpassword = async (req, res) => {
 
         user.password = await bcrypt.hash(password, 10)
 
-        // ✅ THIS IS THE PART YOU ASKED ABOUT
+        // âœ… THIS IS THE PART YOU ASKED ABOUT
         user.resetToken = undefined
         user.resetTokenExpires = undefined
 
@@ -488,6 +500,7 @@ exports.resetpassword = async (req, res) => {
         res.status(500).json({ message: 'Reset failed' })
     }
 }
+
 
 
 

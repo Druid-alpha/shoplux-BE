@@ -53,13 +53,26 @@ const sendEmail = async ({ to, subject, text, htmlContent, title, preheader }) =
             throw new Error('SMTP credentials are missing')
         }
 
-        const transporter = nodeMailer.createTransport({
-            service: 'gmail',
-            auth: {
-                user: smtpUser,
-                pass: smtpPass
-            }
-        })
+        const smtpService = process.env.SMTP_SERVICE
+        const smtpHost = process.env.SMTP_HOST
+        const smtpPort = process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : undefined
+        const smtpSecure = process.env.SMTP_SECURE === 'true'
+
+        const transporter = nodeMailer.createTransport(
+            smtpHost
+                ? {
+                    host: smtpHost,
+                    port: smtpPort || (smtpSecure ? 465 : 587),
+                    secure: smtpSecure,
+                    auth: { user: smtpUser, pass: smtpPass }
+                }
+                : {
+                    service: smtpService || 'gmail',
+                    auth: { user: smtpUser, pass: smtpPass }
+                }
+        )
+
+        await transporter.verify()
 
         const finalHtml = htmlContent ? emailTemplate(title || subject, htmlContent, preheader) : undefined
 
@@ -71,7 +84,13 @@ const sendEmail = async ({ to, subject, text, htmlContent, title, preheader }) =
             html: finalHtml,
         })
     } catch (error) {
-        console.error('Email sending failed:', error)
+        console.error('Email sending failed:', {
+            message: error?.message,
+            code: error?.code,
+            response: error?.response,
+            responseCode: error?.responseCode,
+            command: error?.command
+        })
         throw new Error('Email could not be sent')
     }
 }
