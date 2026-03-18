@@ -600,18 +600,22 @@ exports.addReturnMessage = async (req, res) => {
           to: order.user.email,
           subject: 'Return update - ShopLuxe',
           title: 'Return update',
-          text: `Message from support on your return request. Order ID: ${order._id}. ${order.returnNote}`,
+          text: `Support replied to your return request. Order ID: ${order._id}. Message: ${order.returnNote}`,
           htmlContent: `
-            <h1>Message from support</h1>
+            <h1>Your return update</h1>
+            <p>Hi ${order.user?.name?.split(' ')[0] || 'there'}, we reviewed your return request.</p>
             <div class="card">
               <p><strong>Order ID:</strong> ${order._id}</p>
-              <p>${order.returnNote}</p>
+              <p><strong>Return status:</strong> ${order.returnStatus || 'requested'}</p>
+              <p><strong>Message from support:</strong> ${order.returnNote}</p>
             </div>
+            <div class="divider"></div>
+            <p class="muted">If you need to add more details or attachments, reply inside your order page.</p>
             <div style="text-align:center; margin:20px 0;">
-              <a class="button" href="${process.env.CLIENT_URL}/orders/${order._id}">View Order</a>
+              <a class="button" href="${process.env.CLIENT_URL}/orders/${order._id}">View return details</a>
             </div>
           `,
-          preheader: 'New message about your return'
+          preheader: 'Support replied to your return request'
         })
       }
     } catch (emailErr) {
@@ -672,12 +676,18 @@ exports.addReturnMessageUser = async (req, res) => {
           to: process.env.ADMIN_EMAIL,
           subject: 'New customer return message - ShopLuxe',
           title: 'New return message',
-          text: `Order ID: ${order._id}. Message: ${trimmed}`,
+          text: `Order ID: ${order._id}. Customer: ${order.user?.name || 'Unknown'}. Message: ${trimmed || 'Attachment(s) provided'}`,
           htmlContent: `
             <h1>New return message</h1>
+            <p>A customer sent a new message on a return request.</p>
             <div class="card">
               <p><strong>Order ID:</strong> ${order._id}</p>
-              <p>${trimmed}</p>
+              <p><strong>Customer:</strong> ${order.user?.name || 'Unknown'}</p>
+              <p><strong>Message:</strong> ${trimmed || 'Attachment(s) provided'}</p>
+              ${files.length ? `<p><strong>Attachments:</strong> ${files.length}</p>` : ''}
+            </div>
+            <div style="text-align:center; margin:20px 0;">
+              <a class="button" href="${process.env.CLIENT_URL}/admin">Open Admin</a>
             </div>
           `,
           preheader: 'A customer sent a return message'
@@ -867,16 +877,23 @@ exports.updateReturnStatus = async (req, res) => {
             order.returnReason ? ` Reason: ${order.returnReason}.` : ''
           }${
             order.returnNote ? ` Note from support: ${order.returnNote}.` : ''
-          }`,
+          }${status === 'refunded' ? ` Refund amount: ${order.refundAmount || order.totalAmount || 0}.` : ''}`,
           htmlContent: `
-            <h1>Your return request was ${status}</h1>
+            <h1>Return ${status}</h1>
+            <p>Hi ${order.user?.name?.split(' ')[0] || 'there'}, here is the latest update on your return.</p>
             <div class="card">
               <p><strong>Order ID:</strong> ${order._id}</p>
+              <p><strong>Status:</strong> ${status}</p>
               ${reasonLine}
               ${noteLine}
+              ${status === 'refunded'
+                ? `<p><strong>Refund amount:</strong> ${order.refundAmount || order.totalAmount || 0}</p>`
+                : ''}
             </div>
+            <div class="divider"></div>
+            <p class="muted">You can view the full timeline and messages in your order details.</p>
             <div style="text-align:center; margin:20px 0;">
-              <a class="button" href="${process.env.CLIENT_URL}/orders/${order._id}">View Order</a>
+              <a class="button" href="${process.env.CLIENT_URL}/orders/${order._id}">View return details</a>
             </div>
           `,
           preheader: `Return ${status}`
